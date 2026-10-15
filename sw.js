@@ -4,7 +4,8 @@ const FILES = ['./', 'index.html', 'style.css', 'app.js', 'logic.js', 'excel.js'
 
 self.addEventListener('install', e => {
   self.skipWaiting();
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)));
+  // cache: 'reload' skips the browser's HTTP cache, so a quick follow-up release can't store the previous files.
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES.map(f => new Request(f, { cache: 'reload' })))));
 });
 self.addEventListener('activate', e => e.waitUntil(
   caches.keys()

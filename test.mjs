@@ -205,4 +205,22 @@ const headerRow = ws => { let h = 0; ws.eachRow((r, n) => { if (!h && r.getCell(
   assert.deepEqual(await importWorkbook(ExcelJS, buf), { state: big, skipped: [] });
 }
 
+// ===== Service worker =====
+// An update must cache fresh files, not the browser's HTTP-cached ones (GitHub Pages caches for 10 minutes).
+{
+  const handlers = {}, realRequest = globalThis.Request;
+  let cached, installed;
+  globalThis.self = { addEventListener: (type, fn) => { handlers[type] = fn; }, skipWaiting() {} };
+  globalThis.caches = { open: async () => ({ addAll: async reqs => { cached = reqs; } }) };
+  globalThis.Request = class { constructor(url, init = {}) { this.url = url; this.cache = init.cache; } }; // Node's Request rejects relative URLs
+  await import('./sw.js');
+  handlers.install({ waitUntil: p => { installed = p; } });
+  await installed;
+  assert.ok(cached.length >= 10, 'all app files cached');
+  assert.ok(cached.every(r => r instanceof globalThis.Request && r.cache === 'reload'), 'every file fetched with cache: reload');
+  globalThis.Request = realRequest;
+  delete globalThis.self;
+  delete globalThis.caches;
+}
+
 console.log('all tests passed');
