@@ -1,6 +1,7 @@
 // UI: renders the view chosen by the URL hash into #view and routes taps to `actions`.
 // Rules live in logic.js; Excel lives in excel.js.
 import * as L from './logic.js';
+import { exportWorkbook, importWorkbook } from './excel.js';
 
 const KEY = 'inventory-app-v1';
 const $ = sel => document.querySelector(sel);
@@ -251,6 +252,38 @@ document.addEventListener('change', e => {
   if (L.dropsProducts(lvl, n) && !confirm('Fewer partitions will remove the products in the ones dropped. Continue?')) return render();
   L.setPartitions(lvl, n);
   commit();
+});
+
+// ---- Excel import / export
+const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+Object.assign(actions, {
+  async export() {
+    const name = `warehouse-${L.ymd()}.xlsx`;
+    const file = new File([await exportWorkbook(window.ExcelJS, state)], name, { type: XLSX_TYPE });
+    if (navigator.canShare?.({ files: [file] })) {
+      try { return await navigator.share({ files: [file] }); }
+      catch (e) { if (e.name === 'AbortError') return; } // user cancelled; any other share failure falls back to a download
+    }
+    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(file), download: name });
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  },
+  import() { $('#file').click(); },
+});
+
+$('#file').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  e.target.value = ''; // lets the same file be picked again later
+  if (!file) return;
+  const res = await importWorkbook(window.ExcelJS, await file.arrayBuffer());
+  if (res.error) return alert(res.error);
+  const s = L.summary(res.state);
+  const skipped = res.skipped.length ? `\n\nSkipped ${res.skipped.length} line(s):\n${res.skipped.slice(0, 10).join('\n')}` : '';
+  if (!confirm(`Load ${s.rows} rows, ${s.stillages} stillages and ${s.products} products?${skipped}\n\nThis replaces everything on this device.`)) return;
+  state = res.state;
+  commit();
+  alert('Import complete.');
 });
 
 // ---- Start
