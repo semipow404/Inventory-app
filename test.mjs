@@ -188,4 +188,21 @@ const headerRow = ws => { let h = 0; ws.eachRow((r, n) => { if (!h && r.getCell(
   assert.equal(await tamper(() => {}), 'accepted');
 }
 
+// --- A big warehouse exports quickly enough to keep the phone's share sheet (it allows ~5 s after the tap).
+// ExcelJS checks each merge against all earlier ones, so merging every count-table cell grew as n².
+{
+  const big = L.newState();
+  big.rows.push(L.newRow('Big Row'));
+  for (let i = 0; i < 200; i++) L.addColumn(big.rows[0], 'stillage', 'right');
+  big.rows[0].columns.forEach((col, c) => col.levels.forEach(lvl => {
+    L.setPartitions(lvl, 4);
+    lvl.parts = lvl.parts.map((_, p) => ({ style: 'LSW', number: String(c).padStart(3, '0'), color: 'C' + p, stock: c * 100 + p }));
+  }));
+  const t = Date.now();
+  const buf = await exportWorkbook(ExcelJS, big);
+  const ms = Date.now() - t;
+  assert.ok(ms < 3000, `exporting ${L.summary(big).products} products took ${ms} ms`);
+  assert.deepEqual(await importWorkbook(ExcelJS, buf), { state: big, skipped: [] });
+}
+
 console.log('all tests passed');

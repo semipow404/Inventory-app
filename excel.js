@@ -17,7 +17,7 @@ const GREY = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9D9D9' } 
 const col = i => 2 + i * W; // map column i and table field i both start here, so the table lines up under the map
 
 // Writes a value and style, then merges. Style goes on first: ExcelJS copies it to every cell of the merge.
-// ponytail: ExcelJS checks each merge against all earlier ones (O(n²)), ~1s per 600 products on a PC; write the table unmerged if exports get slow.
+// ponytail: ExcelJS checks each merge against all earlier ones, so time grows as merges²; keep merges to ~2 per product.
 function block(ws, r, c, w, h, value, style = {}) {
   const cell = ws.getCell(r, c);
   cell.value = value;
@@ -57,7 +57,9 @@ export async function exportWorkbook(ExcelJS, state, { date = new Date(), chunk 
   for (const x of allParts(state)) {
     if (!hasProduct(x.part)) continue;
     r += 1;
-    [x.row, x.box, x.partition, code(x.part), x.part.stock].forEach((v, i) => block(ws, r, col(i), W, 1, v));
+    // Text spills into the empty cells to its right, so only Stock (a number, which doesn't spill) is merged.
+    [x.row, x.box, x.partition, code(x.part)].forEach((v, i) => block(ws, r, col(i), 1, 1, v));
+    block(ws, r, col(4), W, 1, x.part.stock);
   }
 
   const meta = wb.addWorksheet('_layout', { state: 'hidden' });
