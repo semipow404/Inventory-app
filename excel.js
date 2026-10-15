@@ -70,6 +70,15 @@ export async function exportWorkbook(ExcelJS, state, { date = new Date(), chunk 
 
 const key = (row, box, partition) => `${row.trim().toUpperCase()}|${box.trim().toLowerCase()}|${Number(partition)}`;
 
+// The hidden sheet is untrusted input: accept only the shape the app itself saves.
+const isText = v => typeof v === 'string';
+const isPart = p => isText(p?.style) && isText(p.number) && isText(p.color) && (p.stock === null || (Number.isInteger(p.stock) && p.stock >= 0));
+const isLevel = lvl => Array.isArray(lvl?.parts) && lvl.parts.length >= 1 && lvl.parts.length <= 4 && lvl.parts.every(isPart);
+const isColumn = col => col?.type === 'space' ||
+  (col?.type === 'stillage' && Array.isArray(col.levels) && col.levels.length === LEVELS.length && col.levels.every(isLevel));
+const isState = s => Array.isArray(s?.styles) && s.styles.every(isText) &&
+  Array.isArray(s.rows) && s.rows.every(row => isText(row?.name) && Array.isArray(row.columns) && row.columns.every(isColumn));
+
 // Layout comes from the hidden sheet; Stock comes from the count table, so counts edited in Excel win.
 export async function importWorkbook(ExcelJS, buffer) {
   const wb = new ExcelJS.Workbook();
@@ -81,7 +90,7 @@ export async function importWorkbook(ExcelJS, buffer) {
   for (let r = 2; meta.getCell(r, 1).value != null; r++) json += meta.getCell(r, 1).value;
   let state;
   try { state = JSON.parse(json); } catch { return { error: 'The layout data in this file is damaged.' }; }
-  if (!Array.isArray(state?.rows) || !Array.isArray(state?.styles)) return { error: 'The layout data in this file is damaged.' };
+  if (!isState(state)) return { error: 'The layout data in this file is damaged.' };
 
   const index = new Map(allParts(state).map(x => [key(x.row, x.box, x.partition), x.part]));
   let header = 0;

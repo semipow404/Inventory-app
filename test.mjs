@@ -165,4 +165,27 @@ const headerRow = ws => { let h = 0; ws.eachRow((r, n) => { if (!h && r.getCell(
   assert.ok((await importWorkbook(ExcelJS, Buffer.from('not a spreadsheet'))).error);
 }
 
+// --- Layout data the app couldn't have saved itself is rejected (a crafted file could inject HTML via stock)
+{
+  const tamper = async mutate => {
+    const wb = await opened(await exportWorkbook(ExcelJS, sample()));
+    const meta = wb.getWorksheet('_layout');
+    const s = JSON.parse(meta.getCell(2, 1).value);
+    mutate(s);
+    meta.getCell(2, 1).value = JSON.stringify(s);
+    return (await importWorkbook(ExcelJS, await wb.xlsx.writeBuffer())).error ?? 'accepted';
+  };
+  const lsw = s => s.rows[0].columns[1].levels[0];
+  assert.match(await tamper(s => { lsw(s).parts[0].stock = '<img src=x onerror=alert(1)>'; }), /damaged/);
+  assert.match(await tamper(s => { lsw(s).parts[0].stock = -3; }), /damaged/);
+  assert.match(await tamper(s => { lsw(s).parts[0].color = { x: 1 }; }), /damaged/);
+  assert.match(await tamper(s => { lsw(s).parts = []; }), /damaged/);
+  assert.match(await tamper(s => { lsw(s).parts.push(L.emptyPart()); }), /damaged/); // 5 partitions
+  assert.match(await tamper(s => { s.rows[0].columns[1].levels.pop(); }), /damaged/);
+  assert.match(await tamper(s => { s.rows[0].columns[0] = { type: 'shelf' }; }), /damaged/);
+  assert.match(await tamper(s => { s.rows[0].name = 42; }), /damaged/);
+  assert.match(await tamper(s => { s.styles = [null]; }), /damaged/);
+  assert.equal(await tamper(() => {}), 'accepted');
+}
+
 console.log('all tests passed');

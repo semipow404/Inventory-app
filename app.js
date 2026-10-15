@@ -135,7 +135,7 @@ function boxHtml(lvl, label, q, boxAttrs, partAttrs = () => '') {
 function listHtml(items, scrollKey) {
   return `<div class="list" data-scroll="${scrollKey}"><table>
     <thead><tr><th>Code</th><th>Location</th><th>Box</th><th>Stock</th></tr></thead>
-    <tbody>${items.map(x => `<tr><td>${esc(L.code(x.part))}</td><td>${esc(x.row)}</td><td>${x.box}</td><td>${x.part.stock ?? ''}</td></tr>`).join('')}</tbody>
+    <tbody>${items.map(x => `<tr><td>${esc(L.code(x.part))}</td><td>${esc(x.row)}</td><td>${x.box}</td><td>${esc(x.part.stock ?? '')}</td></tr>`).join('')}</tbody>
   </table></div>`;
 }
 
