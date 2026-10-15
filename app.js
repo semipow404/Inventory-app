@@ -98,6 +98,103 @@ Object.assign(actions, {
   'remove-style'({ i }) { state.styles.splice(Number(i), 1); commit(); },
 });
 
+// ---- Dialogs
+// Shows a <dialog>; resolves with the pressed button's value ('save', 'delete' or 'cancel').
+// `check` runs on Save; returning a message keeps the dialog open and shows it.
+function ask(dialog, check = () => null) {
+  const error = dialog.querySelector('.error');
+  error.textContent = '';
+  return new Promise(resolve => {
+    // Resolve from the button press itself: some browsers never fire the dialog's 'close' event.
+    dialog.querySelector('form').onsubmit = e => {
+      e.preventDefault();
+      const choice = e.submitter?.value || 'save';
+      const msg = choice === 'save' ? check() : null;
+      if (msg) return void (error.textContent = msg);
+      dialog.close(choice);
+      resolve(choice);
+    };
+    dialog.onclose = () => resolve('cancel'); // Escape key / back gesture; ignored if a button already resolved
+    dialog.showModal();
+  });
+}
+
+// ---- Warehouse map
+const query = () => ({ style: $('#q-style').value, number: $('#q-number').value.trim(), color: $('#q-color').value.trim() });
+$('#search').addEventListener('input', render);
+
+function boxHtml(lvl, label, q, boxAttrs, partAttrs = () => '') {
+  return `<div class="box" ${boxAttrs}>
+    <span class="label">${label}</span>
+    <div class="parts p${lvl.parts.length}">${lvl.parts.map((p, i) =>
+      `<div class="part${L.matches(p, q) ? ' hit' : ''}" ${partAttrs(i)}>${esc(L.code(p) || 'NA')}</div>`).join('')}</div>
+  </div>`;
+}
+
+function listHtml(items, scrollKey) {
+  return `<div class="list" data-scroll="${scrollKey}"><table>
+    <thead><tr><th>Code</th><th>Location</th><th>Box</th><th>Stock</th></tr></thead>
+    <tbody>${items.map(x => `<tr><td>${esc(L.code(x.part))}</td><td>${esc(x.row)}</td><td>${x.box}</td><td>${x.part.stock ?? ''}</td></tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+function rowHtml(row, r, q) {
+  const nums = L.columnNumbers(row);
+  const adders = side => `<div class="adders">
+      <button data-action="add-col" data-r="${r}" data-type="stillage" data-side="${side}">Add Stillage</button>
+      <button data-action="add-col" data-r="${r}" data-type="space" data-side="${side}">Add Space</button>
+    </div>`;
+  const columns = row.columns.map((col, c) => col.type === 'space'
+    ? `<button class="walkway" data-action="remove-space" data-r="${r}" data-c="${c}">Walk<br>way</button>`
+    : `<div class="col">${col.levels.map((lvl, l) =>
+        boxHtml(lvl, L.LEVELS[l] + nums[c], q, `role="button" data-action="open" data-r="${r}" data-c="${c}" data-l="${l}"`)).join('')}</div>`).join('');
+  return `<section class="row">
+    <h2><button class="row-name" data-action="edit-row" data-r="${r}">${esc(row.name)}</button></h2>
+    <div class="row-scroll" data-scroll="row-${r}">${adders('left')}${columns}${adders('right')}</div>
+  </section>`;
+}
+
+Object.assign(views, {
+  warehouse() {
+    const q = query();
+    const items = L.allParts(state).filter(x => (L.isSearching(q) ? L.matches(x.part, q) : L.hasProduct(x.part)));
+    return { title: 'Warehouse', search: true, html: `
+      <div class="map${state.rows.length ? '' : ' empty'}" data-scroll="map">
+        ${state.rows.map((row, r) => rowHtml(row, r, q)).join('')}
+        <button class="add-row" data-action="new-row" aria-label="Add row">+</button>
+      </div>${listHtml(items, 'list')}` };
+  },
+});
+
+const rowDialog = $('#row-dialog'), rowName = $('#row-name');
+
+Object.assign(actions, {
+  async 'new-row'() {
+    rowDialog.querySelector('[value=delete]').hidden = true;
+    rowName.value = '';
+    if (await ask(rowDialog, () => L.rowNameError(state, rowName.value)) !== 'save') return;
+    state.rows.push(L.newRow(rowName.value));
+    commit();
+  },
+  async 'edit-row'({ r }) {
+    const row = state.rows[r];
+    rowDialog.querySelector('[value=delete]').hidden = false;
+    rowName.value = row.name;
+    const choice = await ask(rowDialog, () => L.rowNameError(state, rowName.value, row));
+    if (choice === 'save') row.name = rowName.value.trim();
+    else if (choice === 'delete' && confirm(`Delete "${row.name}" and everything in it?`)) state.rows.splice(Number(r), 1);
+    else return;
+    commit();
+  },
+  'add-col'({ r, type, side }) { L.addColumn(state.rows[r], type, side); commit(); },
+  'remove-space'({ r, c }) {
+    if (!confirm('Remove this walkway?')) return;
+    state.rows[r].columns.splice(Number(c), 1);
+    commit();
+  },
+  open({ r, c, l }) { location.hash = `#stillage/${r}/${c}/${l}`; },
+});
+
 // ---- Start
 navigator.storage?.persist?.();
 render();
