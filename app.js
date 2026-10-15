@@ -292,4 +292,6 @@ $('#file').addEventListener('change', async e => {
 navigator.storage?.persist?.();
 // Skipped on localhost so a cached copy never hides edits during development; test offline via 127.0.0.1.
 if ('serviceWorker' in navigator && location.hostname !== 'localhost') navigator.serviceWorker.register('sw.js');
+// Always open at Home: opened at a deeper page (a saved link or icon), Back would have no history to return to.
+if (location.hash) history.replaceState(null, '', location.pathname + location.search);
 render();
