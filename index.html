@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1c1c1c">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <title>Stillage Inventory</title>
+  <link rel="stylesheet" href="style.css">
+  <script defer src="exceljs.min.js"></script>
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header>
+    <button id="back" data-action="back" aria-label="Back" hidden>←</button>
+    <h1 id="title">Home</h1>
+  </header>
+  <div id="banner" hidden>Couldn't save on this device — export now to keep your data.</div>
+  <div id="search" hidden>
+    <span>Search</span>
+    <select id="q-style" aria-label="Style"></select>
+    <input id="q-number" aria-label="Number" autocomplete="off" autocapitalize="characters">
+    <input id="q-color" aria-label="Colour" autocomplete="off" autocapitalize="characters">
+  </div>
+  <main id="view"></main>
+  <input type="file" id="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
+
+  <dialog id="row-dialog">
+    <form method="dialog">
+      <h2>Row name</h2>
+      <input id="row-name" autocomplete="off">
+      <p class="error"></p>
+      <menu>
+        <button value="save">Save</button>
+        <button value="cancel">Cancel</button>
+        <button value="delete" class="danger">Delete row</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <dialog id="part-dialog">
+    <form method="dialog">
+      <h2>Name</h2>
+      <div class="code-fields">
+        <select id="p-style" aria-label="Style"></select>
+        <input id="p-number" aria-label="Number" autocomplete="off" autocapitalize="characters">
+        <input id="p-color" aria-label="Colour" autocomplete="off" autocapitalize="characters">
+      </div>
+      <label class="stock">Stock <input id="p-stock" inputmode="numeric" autocomplete="off"></label>
+      <p class="error"></p>
+      <menu>
+        <button value="save">Save</button>
+        <button value="cancel">Cancel</button>
+      </menu>
+    </form>
+  </dialog>
+</body>
+</html>
