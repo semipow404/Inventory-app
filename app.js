@@ -62,6 +62,8 @@ document.addEventListener('submit', e => {
   actions[form.dataset.action](form.dataset, form);
 });
 window.addEventListener('hashchange', render);
+// Another tab or the installed app saved: reload, so this page's older copy can't overwrite it on its next save.
+window.addEventListener('storage', e => { if (e.key === KEY) { state = load(); render(); } });
 
 // ---- Home and Settings
 Object.assign(views, {
