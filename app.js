@@ -195,6 +195,64 @@ Object.assign(actions, {
   open({ r, c, l }) { location.hash = `#stillage/${r}/${c}/${l}`; },
 });
 
+// ---- Stillage close-up
+const partDialog = $('#part-dialog');
+const here = () => {
+  const [r, c, l] = route().args;
+  return { r, c, l, lvl: state.rows[r]?.columns[c]?.levels?.[l] };
+};
+
+Object.assign(views, {
+  stillage(r, c, l) {
+    const lvl = state.rows[r]?.columns[c]?.levels?.[l];
+    if (!lvl) return views.warehouse(); // stale link, e.g. after an import
+    const label = L.LEVELS[l] + L.columnNumbers(state.rows[r])[c];
+    const items = L.allParts(state).filter(x => x.r === r && x.c === c && x.l === l && L.hasProduct(x.part));
+    return { title: 'Warehouse', search: true, html: `
+      <div class="closeup">
+        ${boxHtml(lvl, label, query(), '', i => `role="button" data-action="edit-part" data-p="${i}"`)}
+        <label class="partitions">Partition
+          <select id="partitions">${[1, 2, 3, 4].map(n => `<option${n === lvl.parts.length ? ' selected' : ''}>${n}</option>`).join('')}</select>
+        </label>
+        <button class="danger" data-action="delete-col">Delete column</button>
+      </div>${listHtml(items, 'closeup-list')}` };
+  },
+});
+
+Object.assign(actions, {
+  async 'edit-part'({ p }) {
+    const { lvl } = here();
+    const part = lvl.parts[p];
+    $('#p-style').innerHTML = styleOptions(part.style);
+    $('#p-number').value = part.number;
+    $('#p-color').value = part.color;
+    $('#p-stock').value = part.stock ?? '';
+    let made;
+    const check = () => (made = L.makePart({
+      style: $('#p-style').value, number: $('#p-number').value, color: $('#p-color').value, stock: $('#p-stock').value,
+    })).error;
+    if (await ask(partDialog, check) !== 'save') return;
+    lvl.parts[p] = made.part;
+    commit();
+  },
+  'delete-col'() {
+    const { r, c } = here();
+    if (!confirm('Delete this whole column (levels a, b and c) and everything in it?')) return;
+    state.rows[r].columns.splice(c, 1);
+    save();
+    history.back();
+  },
+});
+
+document.addEventListener('change', e => {
+  if (e.target.id !== 'partitions') return;
+  const { lvl } = here();
+  const n = Number(e.target.value);
+  if (L.dropsProducts(lvl, n) && !confirm('Fewer partitions will remove the products in the ones dropped. Continue?')) return render();
+  L.setPartitions(lvl, n);
+  commit();
+});
+
 // ---- Start
 navigator.storage?.persist?.();
 render();
