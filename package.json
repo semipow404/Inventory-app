@@ -1,0 +1,7 @@
+{
+  "name": "inventory-app",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node test.mjs" },
+  "devDependencies": { "exceljs": "4.4.0" }
+}
