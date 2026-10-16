@@ -28,15 +28,28 @@
   <main id="view"></main>
   <input type="file" id="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
 
-  <dialog id="row-dialog">
+  <dialog id="name-dialog">
     <form method="dialog">
-      <h2>Row name</h2>
-      <input id="row-name" autocomplete="off">
+      <h2 id="name-title">Row name</h2>
+      <input id="name-input" autocomplete="off">
       <p class="error"></p>
       <menu>
         <button value="save">Save</button>
         <button value="cancel">Cancel</button>
         <button value="delete" class="danger">Delete row</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <dialog id="export-dialog">
+    <form method="dialog">
+      <h2>Export to Excel</h2>
+      <label class="check"><input type="checkbox" id="x-map" checked> Stillage map</label>
+      <label class="check"><input type="checkbox" id="x-count" checked> Stock count</label>
+      <p class="error"></p>
+      <menu>
+        <button value="save">Export</button>
+        <button value="cancel">Cancel</button>
       </menu>
     </form>
   </dialog>

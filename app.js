@@ -10,7 +10,7 @@ const esc = s => String(s).replace(/[&<>"']/g, ch => `&#${ch.charCodeAt(0)};`);
 let state = load();
 
 function load() {
-  try { return JSON.parse(localStorage.getItem(KEY)) ?? L.newState(); } catch { return L.newState(); }
+  try { return L.migrate(JSON.parse(localStorage.getItem(KEY))) ?? L.newState(); } catch { return L.newState(); }
 }
 
 function save() {
@@ -126,11 +126,15 @@ function ask(dialog, check = () => null) {
 const query = () => ({ style: $('#q-style').value, number: $('#q-number').value.trim(), color: $('#q-color').value.trim() });
 $('#search').addEventListener('input', render);
 
+// Partitions sit on the same 12×12 grid the Excel map uses (L.LAYOUTS), as CSS grid areas.
 function boxHtml(lvl, label, q, boxAttrs, partAttrs = () => '') {
+  const blocks = L.LAYOUTS.get(lvl.layout);
   return `<div class="box" ${boxAttrs}>
     <span class="label">${label}</span>
-    <div class="parts p${lvl.parts.length}">${lvl.parts.map((p, i) =>
-      `<div class="part${L.matches(p, q) ? ' hit' : ''}" ${partAttrs(i)}>${esc(L.code(p) || 'NA')}</div>`).join('')}</div>
+    <div class="parts" data-n="${lvl.parts.length}">${lvl.parts.map((p, i) => {
+      const [x, y, w, h] = blocks[i];
+      return `<div class="part${L.matches(p, q) ? ' hit' : ''}" style="grid-area:${y + 1}/${x + 1}/span ${h}/span ${w}" ${partAttrs(i)}>${esc(L.code(p) || 'NA')}</div>`;
+    }).join('')}</div>
   </div>`;
 }
 
@@ -148,7 +152,7 @@ function rowHtml(row, r, q) {
       <button data-action="add-col" data-r="${r}" data-type="space" data-side="${side}">Add Space</button>
     </div>`;
   const columns = row.columns.map((col, c) => col.type === 'space'
-    ? `<button class="walkway" data-action="remove-space" data-r="${r}" data-c="${c}">Walk<br>way</button>`
+    ? `<button class="walkway" data-action="edit-space" data-r="${r}" data-c="${c}">${esc(col.name)}</button>`
     : `<div class="col">${col.levels.map((lvl, l) =>
         boxHtml(lvl, L.LEVELS[l] + nums[c], q, `role="button" data-action="open" data-r="${r}" data-c="${c}" data-l="${l}"`)).join('')}</div>`).join('');
   return `<section class="row">
@@ -169,32 +173,40 @@ Object.assign(views, {
   },
 });
 
-const rowDialog = $('#row-dialog'), rowName = $('#row-name');
+// One name pop-up for rows and spaces; a null deleteLabel hides its delete button.
+const nameDialog = $('#name-dialog'), nameInput = $('#name-input');
+function askName(title, value, deleteLabel, check) {
+  $('#name-title').textContent = title;
+  const del = nameDialog.querySelector('[value=delete]');
+  del.hidden = !deleteLabel;
+  del.textContent = deleteLabel ?? '';
+  nameInput.value = value;
+  return ask(nameDialog, check);
+}
 
 Object.assign(actions, {
   async 'new-row'() {
-    rowDialog.querySelector('[value=delete]').hidden = true;
-    rowName.value = '';
-    if (await ask(rowDialog, () => L.rowNameError(state, rowName.value)) !== 'save') return;
-    state.rows.push(L.newRow(rowName.value));
+    if (await askName('Row name', '', null, () => L.rowNameError(state, nameInput.value)) !== 'save') return;
+    state.rows.push(L.newRow(nameInput.value));
     commit();
   },
   async 'edit-row'({ r }) {
     const row = state.rows[r];
-    rowDialog.querySelector('[value=delete]').hidden = false;
-    rowName.value = row.name;
-    const choice = await ask(rowDialog, () => L.rowNameError(state, rowName.value, row));
-    if (choice === 'save') row.name = rowName.value.trim();
+    const choice = await askName('Row name', row.name, 'Delete row', () => L.rowNameError(state, nameInput.value, row));
+    if (choice === 'save') row.name = nameInput.value.trim();
     else if (choice === 'delete' && confirm(`Delete "${row.name}" and everything in it?`)) state.rows.splice(Number(r), 1);
     else return;
     commit();
   },
-  'add-col'({ r, type, side }) { L.addColumn(state.rows[r], type, side); commit(); },
-  'remove-space'({ r, c }) {
-    if (!confirm('Remove this walkway?')) return;
-    state.rows[r].columns.splice(Number(c), 1);
+  async 'edit-space'({ r, c }) {
+    const space = state.rows[r].columns[c];
+    const choice = await askName('Space name', space.name, 'Remove space');
+    if (choice === 'save') space.name = nameInput.value.trim() || 'Walkway';
+    else if (choice === 'delete') state.rows[r].columns.splice(Number(c), 1); // a space holds nothing, so no extra confirm
+    else return;
     commit();
   },
+  'add-col'({ r, type, side }) { L.addColumn(state.rows[r], type, side); commit(); },
   open({ r, c, l }) { location.hash = `#stillage/${r}/${c}/${l}`; },
 });
 
@@ -215,7 +227,7 @@ Object.assign(views, {
       <div class="closeup">
         ${boxHtml(lvl, label, query(), '', i => `role="button" data-action="edit-part" data-p="${i}"`)}
         <label class="partitions">Partition
-          <select id="partitions">${[1, 2, 3, 4].map(n => `<option${n === lvl.parts.length ? ' selected' : ''}>${n}</option>`).join('')}</select>
+          <select id="partitions">${[...L.LAYOUTS.keys()].map(id => `<option${id === lvl.layout ? ' selected' : ''}>${id}</option>`).join('')}</select>
         </label>
         <button class="danger" data-action="delete-col">Delete column</button>
       </div>${listHtml(items, 'closeup-list')}` };
@@ -250,19 +262,23 @@ Object.assign(actions, {
 document.addEventListener('change', e => {
   if (e.target.id !== 'partitions') return;
   const { lvl } = here();
-  const n = Number(e.target.value);
-  if (L.dropsProducts(lvl, n) && !confirm('Fewer partitions will remove the products in the ones dropped. Continue?')) return render();
-  L.setPartitions(lvl, n);
+  const id = e.target.value;
+  if (L.dropsProducts(lvl, L.LAYOUTS.get(id).length) && !confirm('Fewer partitions will remove the products in the ones dropped. Continue?')) return render();
+  L.setLayout(lvl, id);
   commit();
 });
 
 // ---- Excel import / export
 const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
+const exportDialog = $('#export-dialog');
+
 Object.assign(actions, {
   async export() {
+    const parts = () => ({ map: $('#x-map').checked, count: $('#x-count').checked });
+    if (await ask(exportDialog, () => (parts().map || parts().count ? null : 'Tick at least one.')) !== 'save') return;
     const name = `warehouse-${L.ymd()}.xlsx`;
-    const file = new File([await exportWorkbook(window.ExcelJS, state)], name, { type: XLSX_TYPE });
+    const file = new File([await exportWorkbook(window.ExcelJS, state, parts())], name, { type: XLSX_TYPE });
     if (navigator.canShare?.({ files: [file] })) {
       try { return await navigator.share({ files: [file] }); }
       catch (e) { if (e.name === 'AbortError') return; } // user cancelled; any other share failure falls back to a download
