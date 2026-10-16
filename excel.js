@@ -1,5 +1,5 @@
 // Excel export/import. ExcelJS is passed in: window.ExcelJS in the browser, the npm package in tests.
-import { LEVELS, LAYOUTS, columnNumbers, allParts, hasProduct, code, ymd, migrate } from './logic.js';
+import { LEVELS, LAYOUTS, COUNTS_KEPT, columnNumbers, allParts, hasProduct, code, ymd, migrate } from './logic.js';
 
 export const MARKER = 'INVENTORY-APP-V1';
 const HEADER = ['Row', 'Box', 'Partition', 'Code', 'Stock'];
@@ -73,7 +73,11 @@ const key = (row, box, partition) => `${row.trim().toUpperCase()}|${box.trim().t
 
 // The hidden sheet is untrusted input: accept only the shape the app itself saves.
 const isText = v => typeof v === 'string';
-const isPart = p => isText(p?.style) && isText(p.number) && isText(p.color) && (p.stock === null || (Number.isInteger(p.stock) && p.stock >= 0));
+const isWhole = (v, min) => Number.isInteger(v) && v >= min;
+const isCount = c => isWhole(c?.stock, 0) && isText(c.at) && !Number.isNaN(Date.parse(c.at));
+const isPart = p => isText(p?.style) && isText(p.number) && isText(p.color) &&
+  (p.stock === null || isWhole(p.stock, 0)) && (p.full === null || isWhole(p.full, 1)) &&
+  Array.isArray(p.counts) && p.counts.length <= COUNTS_KEPT && p.counts.every(isCount);
 const isLevel = lvl => LAYOUTS.has(lvl?.layout) && Array.isArray(lvl.parts) &&
   lvl.parts.length === LAYOUTS.get(lvl.layout).length && lvl.parts.every(isPart);
 const isColumn = col => (col?.type === 'space' && isText(col.name)) ||

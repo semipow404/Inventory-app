@@ -20,7 +20,9 @@ export const LAYOUTS = new Map([
 ]);
 
 export const newState = () => ({ styles: [], rows: [] });
-export const emptyPart = () => ({ style: '', number: '', color: '', stock: null });
+// full: what "full" means for this partition (for the usage colours). counts: the last COUNTS_KEPT counts, newest last.
+export const emptyPart = () => ({ style: '', number: '', color: '', stock: null, full: null, counts: [] });
+export const COUNTS_KEPT = 10;
 export const newStillage = () => ({ type: 'stillage', levels: LEVELS.map(() => ({ layout: '1', parts: [emptyPart()] })) });
 export const newRow = name => ({ name: name.trim(), columns: [newStillage()] });
 
@@ -87,18 +89,32 @@ export function migrate(state) {
     if (col?.type === 'space' && col.name === undefined) col.name = 'Walkway';
     if (col?.type === 'stillage') for (const lvl of list(col.levels)) {
       if (lvl && lvl.layout === undefined && Array.isArray(lvl.parts)) lvl.layout = FIRST_LAYOUTS[lvl.parts.length - 1];
+      for (const part of list(lvl?.parts)) {
+        if (part && part.full === undefined) part.full = null;
+        if (part && part.counts === undefined) part.counts = [];
+      }
     }
   }
   return state;
 }
 
 // Turns the product pop-up's raw field values into a partition, or an error message. Any part of the code may be blank.
-export function makePart({ style, number, color, stock }) {
-  const p = { style, number: number.trim().toUpperCase(), color: color.trim().toUpperCase(), stock: stock.trim() };
+// Saving a stock number is a count, even if the number didn't change: it's added to `prev`'s counts, stamped `now`.
+export function makePart({ style, number, color, stock, full }, prev = emptyPart(), now = new Date()) {
+  const p = { style, number: number.trim().toUpperCase(), color: color.trim().toUpperCase(), stock: stock.trim(), full: full.trim() };
   if (!p.style && !p.number && !p.color) return { part: emptyPart() };
   if (p.stock !== '' && !/^\d+$/.test(p.stock)) return { error: 'Stock must be a whole number, 0 or more.' };
-  return { part: { ...p, stock: p.stock === '' ? null : Number(p.stock) } };
+  if (p.full !== '' && !/^[1-9]\d*$/.test(p.full)) return { error: 'Full must be a whole number, 1 or more.' };
+  const s = p.stock === '' ? null : Number(p.stock);
+  const counts = s === null ? prev.counts : [...prev.counts, { at: now.toISOString(), stock: s }].slice(-COUNTS_KEPT);
+  return { part: { ...p, stock: s, full: p.full === '' ? null : Number(p.full), counts } };
 }
+
+// When this partition was last counted (ISO string), or null if its stock is blank.
+export const lastCounted = p => (p.stock === null ? null : p.counts.at(-1)?.at ?? null);
+
+// How full the partition is, 0–1 (over full counts as 1); null without a count or a "full" number.
+export const usage = p => (p.stock === null || !p.full ? null : Math.min(p.stock / p.full, 1));
 
 export function addStyle(state, s) {
   s = s.trim().toUpperCase();

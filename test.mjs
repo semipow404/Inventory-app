@@ -3,6 +3,10 @@ import * as L from './logic.js';
 import ExcelJS from 'exceljs';
 import { exportWorkbook, importWorkbook } from './excel.js';
 
+// A partition as the app saves it; full number and previous counts default to none.
+const P = (style, number, color, stock, more = {}) => ({ ...L.emptyPart(), style, number, color, stock, ...more });
+const T0 = new Date('2026-10-16T09:00:00Z');
+
 // --- Box labels skip walkways and renumber when a column is added at the left end
 const s = L.newState();
 s.rows.push(L.newRow('Mid Row'));
@@ -10,7 +14,7 @@ const row = s.rows[0];
 L.addColumn(row, 'space', 'left');
 L.addColumn(row, 'stillage', 'right');
 assert.deepEqual(L.columnNumbers(row), [null, 1, 2]);
-row.columns[1].levels[0].parts[0] = { style: 'LSW', number: '022', color: 'BR', stock: 10 };
+row.columns[1].levels[0].parts[0] = P('LSW', '022', 'BR', 10);
 L.addColumn(row, 'stillage', 'left');
 assert.deepEqual(L.columnNumbers(row), [1, null, 2, 3]);
 const found = L.allParts(s).find(x => L.code(x.part) === 'LSW022BR');
@@ -19,7 +23,7 @@ assert.equal(found.partition, 1);
 assert.equal(L.allParts(s).length, 9); // 3 stillage columns × 3 levels × 1 partition
 
 // --- Search: filled boxes must match that part of the code, ignoring case
-const p = { style: 'LSW', number: '012', color: 'KK', stock: 20 };
+const p = P('LSW', '012', 'KK', 20);
 assert.ok(L.matches(p, { style: 'LSW', number: '', color: '' }));
 assert.ok(L.matches(p, { style: 'LSW', number: '012', color: 'kk' }));
 assert.ok(L.matches(p, { style: '', number: '', color: 'KK' }));
@@ -64,7 +68,7 @@ L.addColumn(spaced, 'space', 'left');
 assert.deepEqual(spaced.columns[0], { type: 'space', name: 'Walkway' });
 
 // --- Data saved before named layouts and space names still loads
-const parts = n => Array.from({ length: n }, () => L.emptyPart());
+const parts = n => Array.from({ length: n }, () => ({ style: '', number: '', color: '', stock: null })); // first-release partition shape
 const old = { styles: [], rows: [{ name: 'R', columns: [
   { type: 'space' },
   { type: 'stillage', levels: [{ parts: parts(1) }, { parts: parts(2) }, { parts: parts(3) }] },
@@ -74,23 +78,54 @@ const migrated = L.migrate(structuredClone(old));
 assert.equal(migrated.rows[0].columns[0].name, 'Walkway');
 assert.deepEqual(migrated.rows[0].columns[1].levels.map(x => x.layout), ['1', '2II', '3II']);
 assert.equal(migrated.rows[0].columns[2].levels[0].layout, '4');
+assert.deepEqual(migrated.rows[0].columns[1].levels[0].parts[0], L.emptyPart()); // gains full: null, counts: []
 assert.deepEqual(L.migrate(structuredClone(migrated)), migrated); // already-current data is left alone
 assert.doesNotThrow(() => L.migrate({ rows: [null, { columns: 'x' }] })); // garbage is left for validation to reject
 
 // --- Product pop-up values
-assert.deepEqual(L.makePart({ style: 'LSW', number: ' 022 ', color: 'wrbf', stock: '12' }).part,
-  { style: 'LSW', number: '022', color: 'WRBF', stock: 12 });
-assert.equal(L.makePart({ style: 'LSW', number: '022', color: '', stock: '' }).part.stock, null);
-assert.equal(L.makePart({ style: 'LSW', number: '022', color: '', stock: '0' }).part.stock, 0);
+assert.deepEqual(L.makePart({ style: 'LSW', number: ' 022 ', color: 'wrbf', stock: '12', full: '' }, L.emptyPart(), T0).part,
+  P('LSW', '022', 'WRBF', 12, { counts: [{ at: T0.toISOString(), stock: 12 }] }));
+assert.equal(L.makePart({ style: 'LSW', number: '022', color: '', stock: '', full: '' }).part.stock, null);
+assert.equal(L.makePart({ style: 'LSW', number: '022', color: '', stock: '0', full: '' }).part.stock, 0);
 // Part of a code is enough, e.g. colour only
-assert.deepEqual(L.makePart({ style: '', number: '', color: 'kk', stock: '3' }).part, { style: '', number: '', color: 'KK', stock: 3 });
-assert.deepEqual(L.makePart({ style: '', number: '022', color: '', stock: '' }).part, { style: '', number: '022', color: '', stock: null });
-const kk = { style: '', number: '', color: 'KK', stock: 3 };
+assert.deepEqual(L.makePart({ style: '', number: '', color: 'kk', stock: '3', full: '' }, L.emptyPart(), T0).part, P('', '', 'KK', 3, { counts: [{ at: T0.toISOString(), stock: 3 }] }));
+assert.deepEqual(L.makePart({ style: '', number: '022', color: '', stock: '', full: '' }).part, P('', '022', '', null));
+const kk = P('', '', 'KK', 3);
 assert.ok(L.matches(kk, { style: '', number: '', color: 'kk' }));
 assert.ok(!L.matches(kk, { style: 'LSW', number: '', color: 'KK' }));
-assert.ok(L.makePart({ style: 'LSW', number: '022', color: '', stock: '-1' }).error);
-assert.ok(L.makePart({ style: 'LSW', number: '022', color: '', stock: '2.5' }).error);
-assert.deepEqual(L.makePart({ style: '', number: ' ', color: '', stock: '5' }).part, L.emptyPart());
+assert.ok(L.makePart({ style: 'LSW', number: '022', color: '', stock: '-1', full: '' }).error);
+assert.ok(L.makePart({ style: 'LSW', number: '022', color: '', stock: '2.5', full: '' }).error);
+assert.deepEqual(L.makePart({ style: '', number: ' ', color: '', stock: '5', full: '' }).part, L.emptyPart());
+
+// --- "Full" number, last counted and the previous 10 counts (kept with the partition, shown only as "last counted")
+{
+  const T1 = new Date('2026-10-16T14:05:00Z');
+  const fields = (stock, full = '40') => ({ style: 'LSW', number: '022', color: 'BR', stock, full });
+  const first = L.makePart(fields('38'), L.emptyPart(), T0).part;
+  assert.equal(first.full, 40);
+  assert.deepEqual(first.counts, [{ at: T0.toISOString(), stock: 38 }]);
+  assert.equal(L.lastCounted(first), T0.toISOString());
+  const recount = L.makePart(fields('38'), first, T1).part;              // same number is still a count
+  assert.equal(L.lastCounted(recount), T1.toISOString());
+  assert.equal(recount.counts.length, 2);
+  const blank = L.makePart(fields(''), recount, T1).part;                // blank stock = not counted: no date, history kept
+  assert.equal(L.lastCounted(blank), null);
+  assert.equal(blank.counts.length, 2);
+  let many = first;
+  for (let i = 0; i < 15; i++) many = L.makePart(fields(String(i), ''), many, new Date(T0.getTime() + i * 1000)).part;
+  assert.equal(many.counts.length, 10);                                  // only the last 10 are kept
+  assert.equal(many.counts.at(-1).stock, 14);
+  assert.equal(many.full, null);
+  assert.match(L.makePart(fields('1', '0')).error, /Full/);              // full must be a whole number of 1 or more
+  assert.match(L.makePart(fields('1', '2.5')).error, /Full/);
+  assert.deepEqual(L.makePart({ style: '', number: '', color: '', stock: '5', full: '40' }, recount).part, L.emptyPart()); // clearing resets all
+  // Usage: stock ÷ full, capped at full; unknown without a count or a full number
+  assert.equal(L.usage({ ...first, stock: 20 }), 0.5);
+  assert.equal(L.usage({ ...first, stock: 50 }), 1);
+  assert.equal(L.usage({ ...first, stock: 0 }), 0);
+  assert.equal(L.usage({ ...first, full: null }), null);
+  assert.equal(L.usage({ ...first, stock: null }), null);
+}
 
 // --- Row names
 assert.ok(L.rowNameError(s, '  '));
@@ -124,15 +159,15 @@ function sample() {
   L.addColumn(mid, 'stillage', 'right');    // columns: [walkway, stillage 1, stillage 2]
   const one = mid.columns[1], two = mid.columns[2];
   L.setLayout(one.levels[0], '4');
-  one.levels[0].parts[0] = { style: 'LSW', number: '022', color: 'BR', stock: 10 };
-  one.levels[0].parts[3] = { style: 'LSW', number: '021', color: 'WKOF', stock: null };
+  one.levels[0].parts[0] = P('LSW', '022', 'BR', 10, { full: 40, counts: [{ at: T0.toISOString(), stock: 10 }] });
+  one.levels[0].parts[3] = P('LSW', '021', 'WKOF', null);
   L.setLayout(two.levels[1], '2II');
   L.setLayout(two.levels[2], '3II');
-  two.levels[2].parts[2] = { style: 'LAN', number: '911', color: 'FG', stock: 0 };
-  back.columns[0].levels[0].parts[0] = { style: 'LAN', number: '042', color: 'W', stock: 7 };
+  two.levels[2].parts[2] = P('LAN', '911', 'FG', 0);
+  back.columns[0].levels[0].parts[0] = P('LAN', '042', 'W', 7);
   mid.columns[0].name = 'Fire exit';
   L.setLayout(back.columns[0].levels[1], '16');
-  back.columns[0].levels[1].parts[15] = { style: '', number: '', color: 'KK', stock: 11 }; // colour-only code
+  back.columns[0].levels[1].parts[15] = P('', '', 'KK', 11); // colour-only code
   L.setLayout(back.columns[0].levels[2], '3T');
   return s;
 }
@@ -182,6 +217,12 @@ const headerRow = ws => { let h = 0; ws.eachRow((r, n) => { if (!h && r.getCell(
   assert.deepEqual(line(h + 4), ['Back Row', 'a1', '1', 'LAN042W', '7']);
   assert.deepEqual(line(h + 5), ['Back Row', 'b1', '16', 'KK', '11']);
   assert.equal(ws.getCell(h + 6, col(0)).text, '');
+  // Full numbers and count dates stay out of the visible sheet: no extra column, map shows codes only
+  assert.equal(ws.getCell(h, col(5)).text, '');
+  assert.equal(ws.getCell(h + 1, col(5)).text, '');
+  ws.eachRow(r => r.eachCell(c => { // (ExcelJS's .text throws on an empty merged cell, so skip empties)
+    if (c.value != null) assert.ok(!/2026-10-16|\/ 40/.test(c.text), `visible cell ${c.address} holds usage data`);
+  }));
 }
 
 // --- Export options: map only, or count only; both files still import in full (layout travels in the hidden sheet)
@@ -206,8 +247,9 @@ const headerRow = ws => { let h = 0; ws.eachRow((r, n) => { if (!h && r.getCell(
   ['Mid Row', 'a1', 1, 'LSW022BR', 42].forEach((v, i) => { ws.getCell(10, 2 + i * 6).value = v; });
   const meta = wb.addWorksheet('_layout', { state: 'hidden' });
   meta.getCell(1, 1).value = 'INVENTORY-APP-V1';
+  const oldEmpty = { style: '', number: '', color: '', stock: null };
   meta.getCell(2, 1).value = JSON.stringify({ styles: ['LSW'], rows: [{ name: 'Mid Row', columns: [{ type: 'space' }, { type: 'stillage', levels: [
-    { parts: [{ style: 'LSW', number: '022', color: 'BR', stock: 10 }, L.emptyPart()] }, { parts: [L.emptyPart()] }, { parts: [L.emptyPart()] }] }] }] });
+    { parts: [{ style: 'LSW', number: '022', color: 'BR', stock: 10 }, oldEmpty] }, { parts: [oldEmpty] }, { parts: [oldEmpty] }] }] }] });
   const out = await importWorkbook(ExcelJS, await wb.xlsx.writeBuffer());
   assert.deepEqual(out.skipped, []);
   assert.equal(out.state.rows[0].columns[0].name, 'Walkway');
@@ -244,7 +286,7 @@ const headerRow = ws => { let h = 0; ws.eachRow((r, n) => { if (!h && r.getCell(
   const big = L.newState();
   big.rows.push(L.newRow('Long Row'));
   for (let i = 0; i < 299; i++) L.addColumn(big.rows[0], 'stillage', 'right');
-  big.rows[0].columns[0].levels[0].parts[0] = { style: 'LSW', number: '022', color: 'BR', stock: 1 };
+  big.rows[0].columns[0].levels[0].parts[0] = P('LSW', '022', 'BR', 1);
   assert.ok(JSON.stringify(big).length > 32767, 'layout must not fit in one Excel cell');
   assert.deepEqual(await importWorkbook(ExcelJS, await exportWorkbook(ExcelJS, big)), { state: big, skipped: [] });
 }
@@ -276,6 +318,12 @@ const headerRow = ws => { let h = 0; ws.eachRow((r, n) => { if (!h && r.getCell(
   assert.match(await tamper(s => { lsw(s).layout = '5'; }), /damaged/);
   assert.match(await tamper(s => { lsw(s).layout = 'constructor'; }), /damaged/);
   assert.match(await tamper(s => { s.rows[0].columns[0].name = ['<b>x</b>']; }), /damaged/);
+  assert.match(await tamper(s => { lsw(s).parts[0].full = 0; }), /damaged/);
+  assert.match(await tamper(s => { lsw(s).parts[0].full = '<b>40</b>'; }), /damaged/);
+  assert.match(await tamper(s => { lsw(s).parts[0].counts = 'x'; }), /damaged/);
+  assert.match(await tamper(s => { lsw(s).parts[0].counts[0].stock = -1; }), /damaged/);
+  assert.match(await tamper(s => { lsw(s).parts[0].counts[0].at = '<img src=x>'; }), /damaged/);
+  assert.match(await tamper(s => { lsw(s).parts[0].counts = Array(11).fill(lsw(s).parts[0].counts[0]); }), /damaged/);
   assert.match(await tamper(s => { s.rows[0].columns[1].levels.pop(); }), /damaged/);
   assert.match(await tamper(s => { s.rows[0].columns[0] = { type: 'shelf' }; }), /damaged/);
   assert.match(await tamper(s => { s.rows[0].name = 42; }), /damaged/);
@@ -291,7 +339,7 @@ const headerRow = ws => { let h = 0; ws.eachRow((r, n) => { if (!h && r.getCell(
   for (let i = 0; i < 200; i++) L.addColumn(big.rows[0], 'stillage', 'right');
   big.rows[0].columns.forEach((col, c) => col.levels.forEach(lvl => {
     L.setLayout(lvl, '4');
-    lvl.parts = lvl.parts.map((_, p) => ({ style: 'LSW', number: String(c).padStart(3, '0'), color: 'C' + p, stock: c * 100 + p }));
+    lvl.parts = lvl.parts.map((_, p) => P('LSW', String(c).padStart(3, '0'), 'C' + p, c * 100 + p));
   }));
   const t = Date.now();
   const buf = await exportWorkbook(ExcelJS, big);
