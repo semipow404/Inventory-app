@@ -48,7 +48,7 @@ header h1 { flex: 1; margin: 0; text-align: center; font-size: 1.6rem; font-weig
 .label { position: absolute; top: 1px; left: 4px; font-size: .75rem; line-height: 1; color: var(--label); }
 /* The 12×12 grid of logic.js LAYOUTS; minmax(0, …) stops long codes from stretching their track */
 .parts { display: grid; height: 100%; grid-template: repeat(12, minmax(0, 1fr)) / repeat(12, minmax(0, 1fr)); }
-.part { display: flex; align-items: center; justify-content: center; overflow: hidden; text-align: center; padding: 1px; font-size: .7rem; word-break: break-all; line-height: 1.1; }
+.part { position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; text-align: center; padding: 1px; font-size: .7rem; word-break: break-all; line-height: 1.1; }
 .parts[data-n="1"] .part { font-size: 1.1rem; }
 .parts:not([data-n="1"]) .part { border: 1px solid var(--line); }
 .parts[data-n="6"] .part, .parts[data-n="9"] .part { font-size: .55rem; }
@@ -58,13 +58,22 @@ header h1 { flex: 1; margin: 0; text-align: center; font-size: 1.6rem; font-weig
 .parts.usage .part { flex-direction: column; color: #fff; }
 .parts.usage .part b { display: block; }
 .parts.usage .part.hit { outline: 3px solid #fff; outline-offset: -3px; }
-.usage-bar { flex: none; display: flex; justify-content: center; gap: 10px; padding: 6px; }
-.usage-toggle.move.on { background: #c79100; border-color: #c79100; color: #000; }
+.usage-bar { flex: none; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; padding: 6px; }
 .move-hint { flex: none; margin: 0; padding: 6px 10px; text-align: center; background: #c79100; color: #000; }
 .part[data-picked] { outline: 3px dashed #ffd400; outline-offset: -3px; }
-.usage-toggle { background: none; color: var(--text); border: 2px solid var(--line); border-radius: 16px; padding: 6px 16px; font-size: .9rem; }
-.usage-toggle.on { background: var(--hit); border-color: var(--hit); }
-.walkway { flex: none; width: 70px; padding: 4px; background: none; border: 0; color: var(--text); overflow-wrap: anywhere; }
+/* Mode buttons under the map; each lights up in its own colour when on */
+.mode-btn { background: none; color: var(--text); border: 2px solid var(--line); border-radius: 16px; padding: 6px 14px; font-size: .9rem; }
+.mode-btn.on { color: #000; }
+.mode-btn.green.on { background: var(--hit); border-color: var(--hit); color: #fff; }
+.mode-btn.amber.on { background: #c79100; border-color: #c79100; }
+.mode-btn.blue.on { background: #4d8dff; border-color: #4d8dff; }
+.mode-btn.teal.on { background: #22b8b0; border-color: #22b8b0; }
+/* 30-day stock line (close-up, usage on): drawn behind the partition's text */
+.graph { position: absolute; inset: 0; width: 100%; height: 100%; }
+.graph polyline { fill: none; stroke: #1f3cff; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.dot { position: absolute; width: 7px; height: 7px; border-radius: 50%; background: #1f3cff; transform: translate(-50%, -50%); }
+.part .txt { position: relative; z-index: 1; }
+.walkway { flex: none; display: flex; align-items: center; justify-content: center; text-align: center; width: 70px; padding: 4px; background: none; border: 0; color: var(--text); overflow-wrap: anywhere; }
 .adders { flex: none; display: flex; flex-direction: column; justify-content: space-around; padding: 0 8px; }
 .adders button { width: 72px; padding: 6px 4px; background: none; color: var(--text); border: 2px solid #fff; border-radius: 6px; font-size: .8rem; }
 .add-row { display: block; margin: 24px auto; width: 56px; height: 48px; font-size: 2rem; background: var(--line); color: #fff; border: 0; border-radius: 6px; }

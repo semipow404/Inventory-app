@@ -135,8 +135,21 @@ const usageColour = p => { const u = L.usage(p); return u === null ? '#2a2f45' :
 const shortDate = iso => (iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '');
 const longDate = iso => new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
+// The 30-day stock line drawn across a partition: 0 at the bottom, Full (or the highest count) at the top.
+function graphHtml(p) {
+  const line = L.stockLine(p);
+  if (!line.length) return '';
+  const top = p.full || Math.max(1, ...line.map(pt => pt.stock));
+  const y = s => (96 - Math.min(s / top, 1) * 92).toFixed(1); // keeps 0 and full just inside the edges
+  const x = pt => (pt.x * 100).toFixed(1);
+  return `<svg class="graph" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polyline points="${
+    line.map(pt => `${x(pt)},${y(pt.stock)}`).join(' ')}"/></svg>${
+    line.filter(pt => pt.dot).map(pt => `<i class="dot" style="left:${x(pt)}%;top:${y(pt.stock)}%"></i>`).join('')}`;
+}
+
 // Partitions sit on the same 12×12 grid the Excel map uses (L.LAYOUTS), as CSS grid areas.
-function boxHtml(lvl, label, q, boxAttrs, partAttrs = () => '') {
+// `graphs` adds the 30-day stock lines (the close-up, with usage on).
+function boxHtml(lvl, label, q, boxAttrs, partAttrs = () => '', graphs = false) {
   const blocks = L.LAYOUTS.get(lvl.layout);
   return `<div class="box" ${boxAttrs}>
     <span class="label">${label}</span>
@@ -146,7 +159,8 @@ function boxHtml(lvl, label, q, boxAttrs, partAttrs = () => '') {
       const body = usageOn && L.hasProduct(p)
         ? `${esc(L.code(p))}<b>${esc(p.stock ?? '–')}${p.full ? ` / ${esc(p.full)}` : ''}</b>`
         : esc(L.code(p) || 'NA');
-      return `<div class="part${L.matches(p, q) ? ' hit' : ''}" style="${area}${usageOn ? `;background:${usageColour(p)}` : ''}" ${partAttrs(i)}>${body}</div>`;
+      return `<div class="part${L.matches(p, q) ? ' hit' : ''}" style="${area}${usageOn ? `;background:${usageColour(p)}` : ''}" ${partAttrs(i)}>${
+        graphs ? graphHtml(p) : ''}<span class="txt">${body}</span></div>`;
     }).join('')}</div>
   </div>`;
 }
@@ -158,50 +172,61 @@ function listHtml(items, scrollKey) {
   </table></div>`;
 }
 
-// Moving mode: taps pick partitions instead of opening the close-up. First tap picks a product, the second swaps.
-let moving = false, picked = null; // picked: { r, c, l, p }
+// Map modes. Move: first tap picks a product, the second swaps. Count: a tap opens the quick count pop-up.
+// Edit: shows the controls that change the layout; off at every start so nobody changes it by accident.
+let moving = false, counting = false, editing = false, picked = null; // picked: { r, c, l, p }
 const samePart = (a, b) => a.r === b.r && a.c === b.c && a.l === b.l && a.p === b.p;
 const partAt = ({ r, c, l, p }) => state.rows[r].columns[c].levels[l].parts[p];
 
 function rowHtml(row, r, q) {
   const nums = L.columnNumbers(row);
-  const boxAttrs = (c, l) => (moving ? '' : `role="button" data-action="open" data-r="${r}" data-c="${c}" data-l="${l}"`);
-  const pickAttrs = (c, l) => (moving ? p => `role="button" data-action="pick" data-r="${r}" data-c="${c}" data-l="${l}" data-p="${p}"${
-    picked && samePart(picked, { r, c, l, p }) ? ' data-picked' : ''}` : undefined);
-  const adders = side => `<div class="adders">
+  // What a tap does: open the close-up, or (in Move / Count mode) act on the partition itself.
+  const taps = (c, l) => {
+    const where = `data-r="${r}" data-c="${c}" data-l="${l}"`;
+    if (moving) return ['', p => `role="button" data-action="pick" ${where} data-p="${p}"${picked && samePart(picked, { r, c, l, p }) ? ' data-picked' : ''}`];
+    if (counting) return ['', p => `role="button" data-action="quick-count" ${where} data-p="${p}"`];
+    return [`role="button" data-action="open" ${where}`, undefined];
+  };
+  const adders = side => (editing ? `<div class="adders">
       <button data-action="add-col" data-r="${r}" data-type="stillage" data-side="${side}">Add Stillage</button>
       <button data-action="add-col" data-r="${r}" data-type="space" data-side="${side}">Add Space</button>
-    </div>`;
+    </div>` : '');
   const columns = row.columns.map((col, c) => col.type === 'space'
-    ? `<button class="walkway" data-action="edit-space" data-r="${r}" data-c="${c}">${esc(col.name)}</button>`
-    : `<div class="col">${col.levels.map((lvl, l) =>
-        boxHtml(lvl, L.LEVELS[l] + nums[c], q, boxAttrs(c, l), pickAttrs(c, l))).join('')}</div>`).join('');
+    ? (editing ? `<button class="walkway" data-action="edit-space" data-r="${r}" data-c="${c}">${esc(col.name)}</button>`
+      : `<div class="walkway">${esc(col.name)}</div>`)
+    : `<div class="col">${col.levels.map((lvl, l) => boxHtml(lvl, L.LEVELS[l] + nums[c], q, ...taps(c, l))).join('')}</div>`).join('');
   return `<section class="row">
-    <h2><button class="row-name" data-action="edit-row" data-r="${r}">${esc(row.name)}</button></h2>
+    <h2>${editing ? `<button class="row-name" data-action="edit-row" data-r="${r}">${esc(row.name)}</button>` : esc(row.name)}</h2>
     <div class="row-scroll" data-scroll="row-${r}">${adders('left')}${columns}${adders('right')}</div>
   </section>`;
 }
+
+const modeButton = (action, label, on, cls) =>
+  `<button class="mode-btn ${cls}${on ? ' on' : ''}" data-action="${action}" aria-pressed="${on}">${label}</button>`;
 
 Object.assign(views, {
   warehouse() {
     const q = query();
     const items = L.allParts(state).filter(x => (L.isSearching(q) ? L.matches(x.part, q) : L.hasProduct(x.part)));
-    const hint = picked ? `Now tap where ${esc(L.code(partAt(picked)))} should go (tap it again to cancel)` : 'Tap a product to move';
+    const hint = moving ? (picked ? `Now tap where ${esc(L.code(partAt(picked)))} should go (tap it again to cancel)` : 'Tap a product to move')
+      : counting ? 'Tap a product to count it' : '';
+    const add = editing ? '<button class="add-row" data-action="new-row" aria-label="Add row">+</button>'
+      : state.rows.length ? '' : '<p class="muted">Turn on Edit to add a row.</p>';
     return { title: 'Warehouse', search: true, html: `
-      ${moving ? `<p class="move-hint">${hint}</p>` : ''}
+      ${hint ? `<p class="move-hint">${hint}</p>` : ''}
       <div class="map${state.rows.length ? '' : ' empty'}" data-scroll="map">
         ${state.rows.map((row, r) => rowHtml(row, r, q)).join('')}
-        <button class="add-row" data-action="new-row" aria-label="Add row">+</button>
+        ${add}
       </div>
       <div class="usage-bar">
-        <button class="usage-toggle${usageOn ? ' on' : ''}" data-action="toggle-usage" aria-pressed="${usageOn}">Stillage usage: ${usageOn ? 'ON' : 'OFF'}</button>
-        <button class="usage-toggle move${moving ? ' on' : ''}" data-action="toggle-move" aria-pressed="${moving}">Move: ${moving ? 'ON' : 'OFF'}</button>
+        ${modeButton('toggle-usage', 'Usage', usageOn, 'green')}${modeButton('toggle-move', 'Move', moving, 'amber')}${
+          modeButton('toggle-edit', 'Edit', editing, 'blue')}${modeButton('toggle-count', 'Count', counting, 'teal')}
       </div>${listHtml(items, 'list')}` };
   },
 });
 
 // One name pop-up for rows and spaces; a null deleteLabel hides its delete button.
-const nameDialog = $('#name-dialog'), nameInput = $('#name-input');
+const nameDialog = $('#name-dialog'), nameInput = $('#name-input'), countDialog = $('#count-dialog');
 function askName(title, value, deleteLabel, check) {
   $('#name-title').textContent = title;
   const del = nameDialog.querySelector('[value=delete]');
@@ -240,7 +265,23 @@ Object.assign(actions, {
     render();
   },
   open({ r, c, l }) { location.hash = `#stillage/${r}/${c}/${l}`; },
-  'toggle-move'() { moving = !moving; picked = null; render(); },
+  'toggle-move'() { moving = !moving; if (moving) counting = false; picked = null; render(); },
+  'toggle-count'() { counting = !counting; if (counting) moving = false; picked = null; render(); },
+  'toggle-edit'() { editing = !editing; render(); },
+  async 'quick-count'({ r, c, l, p }) {
+    const at = { r: +r, c: +c, l: +l, p: +p };
+    const part = partAt(at);
+    if (!L.hasProduct(part)) return;
+    $('#c-code').textContent = L.code(part);
+    $('#c-current').textContent = part.stock ?? 'not counted';
+    $('#c-stock').value = '';
+    let made;
+    const answer = ask(countDialog, () => (made = L.countPart(part, $('#c-stock').value)).error);
+    $('#c-stock').focus(); // brings up the number keypad straight away
+    if (await answer !== 'save') return;
+    state.rows[at.r].columns[at.c].levels[at.l].parts[at.p] = made.part;
+    commit();
+  },
   pick({ r, c, l, p }) {
     const at = { r: +r, c: +c, l: +l, p: +p };
     if (picked && samePart(picked, at)) picked = null;                    // tapped again: un-pick
@@ -265,11 +306,11 @@ Object.assign(views, {
     const items = L.allParts(state).filter(x => x.r === r && x.c === c && x.l === l && L.hasProduct(x.part));
     return { title: 'Warehouse', search: true, html: `
       <div class="closeup">
-        ${boxHtml(lvl, label, query(), '', i => `role="button" data-action="edit-part" data-p="${i}"`)}
-        <label class="partitions">Partition
+        ${boxHtml(lvl, label, query(), '', i => `role="button" data-action="edit-part" data-p="${i}"`, usageOn)}
+        ${editing ? `<label class="partitions">Partition
           <select id="partitions">${[...L.LAYOUTS.keys()].map(id => `<option${id === lvl.layout ? ' selected' : ''}>${id}</option>`).join('')}</select>
         </label>
-        <button class="danger" data-action="delete-col">Delete column</button>
+        <button class="danger" data-action="delete-col">Delete column</button>` : ''}
       </div>${listHtml(items, 'closeup-list')}` };
   },
 });

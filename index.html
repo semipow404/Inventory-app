@@ -41,6 +41,19 @@
     </form>
   </dialog>
 
+  <dialog id="count-dialog">
+    <form method="dialog">
+      <h2 id="c-code"></h2>
+      <p>Current stock: <b id="c-current"></b></p>
+      <label class="stock">New count <input id="c-stock" inputmode="numeric" autocomplete="off" autofocus></label>
+      <p class="error"></p>
+      <menu>
+        <button value="save">Save</button>
+        <button value="cancel">Cancel</button>
+      </menu>
+    </form>
+  </dialog>
+
   <dialog id="export-dialog">
     <form method="dialog">
       <h2>Export to Excel</h2>
