@@ -148,6 +148,25 @@ assert.deepEqual(L.styleChoices(['LSW'], ''), ['', 'LSW']);
 assert.deepEqual(L.summary(s), { rows: 1, stillages: 9, products: 1 });
 assert.equal(L.ymd(new Date(2026, 9, 5)), '2026-10-05');
 
+// --- Moving: two partitions swap everything (code, stock, full, counts); into an empty spot it's simply a move
+{
+  const m = L.newState();
+  m.rows.push(L.newRow('A'), L.newRow('B'));
+  L.setLayout(m.rows[0].columns[0].levels[0], '2II');
+  const prod = P('LSW', '022', 'BR', 38, { full: 40, counts: [{ at: T0.toISOString(), stock: 38 }] });
+  const other = P('LAN', '042', 'W', 5);
+  m.rows[0].columns[0].levels[0].parts[0] = prod;
+  m.rows[1].columns[0].levels[2].parts[0] = other;
+  const a = { r: 0, c: 0, l: 0, p: 0 }, b = { r: 1, c: 0, l: 2, p: 0 }, empty = { r: 0, c: 0, l: 0, p: 1 };
+  L.swapParts(m, a, b);                                          // across rows
+  assert.deepEqual(m.rows[0].columns[0].levels[0].parts[0], other);
+  assert.deepEqual(m.rows[1].columns[0].levels[2].parts[0], prod);
+  L.swapParts(m, a, b);                                          // swapping the same two back undoes it
+  assert.deepEqual(m.rows[0].columns[0].levels[0].parts[0], prod);
+  L.swapParts(m, a, empty);
+  assert.deepEqual(m.rows[0].columns[0].levels[0].parts, [L.emptyPart(), prod]);
+}
+
 // ===== Excel =====
 // Sample: walkway, 1/2/3/4 partitions, counted, uncounted and zero stock, two rows.
 function sample() {
@@ -172,17 +191,20 @@ function sample() {
   return s;
 }
 
-// Each stillage is a 12×12 block of Excel cells per level (the layout grid); table fields line up with stillage columns.
+// Map sheet: each stillage is a 12×12 block of Excel cells per level (the layout grid), from column B.
+// Stock count sheet: title in row 1, header in row 2, one line per product from row 3, in columns A–E.
 const G = 12, col = i => 2 + i * G;
 const opened = async buf => { const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf); return wb; };
-const headerRow = ws => { let h = 0; ws.eachRow((r, n) => { if (!h && r.getCell(col(0)).text === 'Row' && r.getCell(col(4)).text === 'Stock') h = n; }); return h; };
+const line = (ws, n) => [1, 2, 3, 4, 5].map(c => ws.getCell(n, c).text);
+const sheets = wb => wb.worksheets.map(s => s.name);
 
-// --- Map layout: row name, column numbers, then levels a/b/c of 12 Excel rows each
+// --- Map sheet: row name, column numbers, then levels a/b/c of 12 Excel rows each
 {
   const wb = await opened(await exportWorkbook(ExcelJS, sample(), { date: new Date(2026, 9, 15) }));
-  const ws = wb.getWorksheet('Warehouse');
-  const at = (r, c) => ws.getCell(r, c).text;
+  assert.deepEqual(sheets(wb), ['Stillage map', 'Stock count', '_layout']);
   assert.equal(wb.getWorksheet('_layout').state, 'hidden');
+  const ws = wb.getWorksheet('Stillage map');
+  const at = (r, c) => ws.getCell(r, c).text;
   // Mid Row: name row 1, numbers row 2, level a rows 3–14, b 15–26, c 27–38
   assert.equal(at(1, 1), 'Mid Row');
   assert.equal(at(2, col(1)), '1');
@@ -206,71 +228,48 @@ const headerRow = ws => { let h = 0; ws.eachRow((r, n) => { if (!h && r.getCell(
   assert.equal(at(62, col(0) + 9), 'NA');                            // partition 12, just above
   assert.equal(at(71, col(0) + 11), 'NA');                           // '3T', level c: top block is 12×6
   assert.equal(at(72, col(0) + 6), 'NA');                            // bottom-right block
-  // --- Count table: walking order, blank stock for uncounted
-  const h = headerRow(ws);
-  assert.ok(h > 0, 'count table header found');
-  assert.ok(ws.getCell(h - 1, 1).text.includes('2026-10-15'));
-  const line = n => [0, 1, 2, 3, 4].map(i => ws.getCell(n, col(i)).text);
-  assert.deepEqual(line(h + 1), ['Mid Row', 'a1', '1', 'LSW022BR', '10']);
-  assert.deepEqual(line(h + 2), ['Mid Row', 'a1', '4', 'LSW021WKOF', '']);
-  assert.deepEqual(line(h + 3), ['Mid Row', 'c2', '3', 'LAN911FG', '0']);
-  assert.deepEqual(line(h + 4), ['Back Row', 'a1', '1', 'LAN042W', '7']);
-  assert.deepEqual(line(h + 5), ['Back Row', 'b1', '16', 'KK', '11']);
-  assert.equal(ws.getCell(h + 6, col(0)).text, '');
-  // Full numbers and count dates stay out of the visible sheet: no extra column, map shows codes only
-  assert.equal(ws.getCell(h, col(5)).text, '');
-  assert.equal(ws.getCell(h + 1, col(5)).text, '');
-  ws.eachRow(r => r.eachCell(c => { // (ExcelJS's .text throws on an empty merged cell, so skip empties)
-    if (c.value != null) assert.ok(!/2026-10-16|\/ 40/.test(c.text), `visible cell ${c.address} holds usage data`);
+  // --- Stock count sheet: walking order, blank stock for uncounted
+  const sc = wb.getWorksheet('Stock count');
+  assert.ok(sc.getCell(1, 1).text.includes('2026-10-15'));
+  assert.deepEqual(line(sc, 2), ['Row', 'Box', 'Partition', 'Code', 'Stock']);
+  assert.deepEqual(line(sc, 3), ['Mid Row', 'a1', '1', 'LSW022BR', '10']);
+  assert.deepEqual(line(sc, 4), ['Mid Row', 'a1', '4', 'LSW021WKOF', '']);
+  assert.deepEqual(line(sc, 5), ['Mid Row', 'c2', '3', 'LAN911FG', '0']);
+  assert.deepEqual(line(sc, 6), ['Back Row', 'a1', '1', 'LAN042W', '7']);
+  assert.deepEqual(line(sc, 7), ['Back Row', 'b1', '16', 'KK', '11']);
+  assert.equal(sc.getCell(8, 1).text, '');
+  // Full numbers and count dates stay out of the visible sheets: no extra column, map shows codes only
+  assert.equal(sc.getCell(2, 6).text, '');
+  assert.equal(sc.getCell(3, 6).text, '');
+  for (const sheet of [ws, sc]) sheet.eachRow(r => r.eachCell(c => { // (ExcelJS's .text throws on an empty merged cell)
+    if (c.value != null) assert.ok(!/2026-10-16|\/ 40/.test(c.text), `visible cell ${sheet.name}!${c.address} holds usage data`);
   }));
 }
 
-// --- Export options: map only, or count only; both files still import in full (layout travels in the hidden sheet)
+// --- Export options: only the ticked sheets are written; either file still imports in full (layout travels hidden)
 {
   const mapOnly = await opened(await exportWorkbook(ExcelJS, sample(), { count: false }));
-  assert.equal(headerRow(mapOnly.getWorksheet('Warehouse')), 0, 'map-only file has no count table');
-  assert.equal(mapOnly.getWorksheet('Warehouse').getCell(1, 1).text, 'Mid Row');
+  assert.deepEqual(sheets(mapOnly), ['Stillage map', '_layout']);
   const countOnly = await opened(await exportWorkbook(ExcelJS, sample(), { map: false }));
-  const ws = countOnly.getWorksheet('Warehouse');
-  assert.match(ws.getCell(1, 1).text, /Inventory count/, 'count-only file starts with the count');
-  assert.equal(headerRow(ws), 2);
+  assert.deepEqual(sheets(countOnly), ['Stock count', '_layout']);
   for (const wb of [mapOnly, countOnly]) {
     assert.deepEqual(await importWorkbook(ExcelJS, await wb.xlsx.writeBuffer()), { state: sample(), skipped: [] });
   }
 }
 
-// --- Files from the first release (6-column table, no layout names or space names) still import
-{
-  const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet('Warehouse');
-  ['Row', 'Box', 'Partition', 'Code', 'Stock'].forEach((h, i) => { ws.getCell(9, 2 + i * 6).value = h; });
-  ['Mid Row', 'a1', 1, 'LSW022BR', 42].forEach((v, i) => { ws.getCell(10, 2 + i * 6).value = v; });
-  const meta = wb.addWorksheet('_layout', { state: 'hidden' });
-  meta.getCell(1, 1).value = 'INVENTORY-APP-V1';
-  const oldEmpty = { style: '', number: '', color: '', stock: null };
-  meta.getCell(2, 1).value = JSON.stringify({ styles: ['LSW'], rows: [{ name: 'Mid Row', columns: [{ type: 'space' }, { type: 'stillage', levels: [
-    { parts: [{ style: 'LSW', number: '022', color: 'BR', stock: 10 }, oldEmpty] }, { parts: [oldEmpty] }, { parts: [oldEmpty] }] }] }] });
-  const out = await importWorkbook(ExcelJS, await wb.xlsx.writeBuffer());
-  assert.deepEqual(out.skipped, []);
-  assert.equal(out.state.rows[0].columns[0].name, 'Walkway');
-  assert.deepEqual(out.state.rows[0].columns[1].levels.map(x => x.layout), ['2II', '1', '1']);
-  assert.equal(out.state.rows[0].columns[1].levels[0].parts[0].stock, 42); // read from the old table columns
-}
-
 // --- Round trip with edits a user might make in Excel (Review Focus 2 and 3)
 {
   const wb = await opened(await exportWorkbook(ExcelJS, sample(), { chunk: 7 })); // tiny chunks split the JSON across many cells
-  const ws = wb.getWorksheet('Warehouse');
-  const h = headerRow(ws);
-  ws.getCell(h + 1, col(4)).value = 99;                 // LSW022BR: new count
-  ws.getCell(h + 3, col(4)).value = 'abc';              // LAN911FG: not a number → skipped, keeps 0
-  ws.getCell(h + 4, col(0)).value = '  back row ';      // LAN042W: different case/spaces still match
-  ws.getCell(h + 4, col(1)).value = 'A1';
-  ws.getCell(h + 4, col(4)).value = null;               // cleared → not counted
-  ws.getCell(h + 6, col(0)).value = 'Mid Row';          // a line for a box that doesn't exist
-  ws.getCell(h + 6, col(1)).value = 'b9';
-  ws.getCell(h + 6, col(2)).value = 1;
-  ws.getCell(h + 6, col(4)).value = 5;
+  const sc = wb.getWorksheet('Stock count');
+  sc.getCell(3, 5).value = 99;                 // LSW022BR: new count
+  sc.getCell(5, 5).value = 'abc';              // LAN911FG: not a number → skipped, keeps 0
+  sc.getCell(6, 1).value = '  back row ';      // LAN042W: different case/spaces still match
+  sc.getCell(6, 2).value = 'A1';
+  sc.getCell(6, 5).value = null;               // cleared → not counted
+  sc.getCell(8, 1).value = 'Mid Row';          // a line for a box that doesn't exist
+  sc.getCell(8, 2).value = 'b9';
+  sc.getCell(8, 3).value = 1;
+  sc.getCell(8, 5).value = 5;
   const out = await importWorkbook(ExcelJS, await wb.xlsx.writeBuffer());
   const expected = sample();
   expected.rows[0].columns[1].levels[0].parts[0].stock = 99;

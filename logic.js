@@ -72,6 +72,12 @@ export function addColumn(row, type, side) {
 
 export const dropsProducts = (level, n) => level.parts.slice(n).some(hasProduct);
 
+// Moving a product: the two partitions ({r, c, l, p}) swap everything they hold. Into an empty spot, that's a move.
+export function swapParts(state, a, b) {
+  const parts = ({ r, c, l }) => state.rows[r].columns[c].levels[l].parts;
+  [parts(a)[a.p], parts(b)[b.p]] = [parts(b)[b.p], parts(a)[a.p]];
+}
+
 // Keeps partitions by number: switching between layouts with the same count keeps every product.
 export function setLayout(level, id) {
   const n = LAYOUTS.get(id).length;

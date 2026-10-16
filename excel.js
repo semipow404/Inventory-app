@@ -10,7 +10,7 @@ const GREY = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9D9D9' } 
 const col = i => 2 + i * G; // map column i and table field i both start here, so the table lines up under the map
 
 // Writes a value and style, then merges. Style goes on first: ExcelJS copies it to every cell of the merge.
-// ponytail: ExcelJS checks each merge against all earlier ones, so time grows as merges²; keep merges to ~2 per product.
+// ponytail: ExcelJS checks each merge against all earlier ones, so time grows as merges²; keep to one merge per partition (the count sheet has none).
 function block(ws, r, c, w, h, value, style = {}) {
   const cell = ws.getCell(r, c);
   cell.value = value;
@@ -19,6 +19,9 @@ function block(ws, r, c, w, h, value, style = {}) {
 }
 
 function drawMap(ws, state) {
+  const widest = Math.max(1, ...state.rows.map(row => row.columns.length));
+  ws.getColumn(1).width = 4;
+  for (let c = 2; c < col(widest); c++) ws.getColumn(c).width = 2;
   let r = 1;
   for (const row of state.rows) {
     block(ws, r, 1, 1, 1, row.name, { font: { bold: true, size: 14 } });
@@ -36,29 +39,26 @@ function drawMap(ws, state) {
     });
     r = top + LEVELS.length * G + 1; // the three levels, then 1 blank row
   }
-  return r;
+}
+
+// Title in row 1, header in row 2, then one line per product in walking order, in columns A–E.
+function writeCount(ws, state, date) {
+  ws.columns = [16, 8, 10, 20, 10].map(width => ({ width }));
+  ws.getCell(1, 1).value = `Inventory count — ${ymd(date)}`;
+  ws.getCell(1, 1).font = { bold: true, size: 14 };
+  HEADER.forEach((h, i) => Object.assign(ws.getCell(2, i + 1), { value: h, font: { bold: true }, border: { bottom: THIN } }));
+  let r = 2;
+  for (const x of allParts(state)) {
+    if (!hasProduct(x.part)) continue;
+    r += 1;
+    [x.row, x.box, x.partition, code(x.part), x.part.stock].forEach((v, i) => { ws.getCell(r, i + 1).value = v; });
+  }
 }
 
 export async function exportWorkbook(ExcelJS, state, { date = new Date(), chunk = 30000, map = true, count = true } = {}) {
   const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet('Warehouse');
-  const widest = Math.max(HEADER.length, ...state.rows.map(row => row.columns.length));
-  ws.getColumn(1).width = 4;
-  for (let c = 2; c < col(widest); c++) ws.getColumn(c).width = 2;
-
-  let r = map ? drawMap(ws, state) + 1 : 1;
-  if (count) {
-    block(ws, r, 1, 1, 1, `Inventory count — ${ymd(date)}`, { font: { bold: true, size: 14 } });
-    r += 1;
-    HEADER.forEach((h, i) => block(ws, r, col(i), G, 1, h, { font: { bold: true }, border: { bottom: THIN } }));
-    for (const x of allParts(state)) {
-      if (!hasProduct(x.part)) continue;
-      r += 1;
-      // Text spills into the empty cells to its right, so only Stock (a number, which doesn't spill) is merged.
-      [x.row, x.box, x.partition, code(x.part)].forEach((v, i) => block(ws, r, col(i), 1, 1, v));
-      block(ws, r, col(4), G, 1, x.part.stock);
-    }
-  }
+  if (map) drawMap(wb.addWorksheet('Stillage map'), state);
+  if (count) writeCount(wb.addWorksheet('Stock count'), state, date);
 
   // The full layout always travels in the hidden sheet, so a map-only or count-only file still imports.
   const meta = wb.addWorksheet('_layout', { state: 'hidden' });
@@ -85,7 +85,7 @@ const isColumn = col => (col?.type === 'space' && isText(col.name)) ||
 const isState = s => Array.isArray(s?.styles) && s.styles.every(isText) &&
   Array.isArray(s.rows) && s.rows.every(row => isText(row?.name) && Array.isArray(row.columns) && row.columns.every(isColumn));
 
-// The count table's header row and each field's column, found by text: older versions put the table in other columns.
+// The count table's header row and each field's column, found by text so rows or columns added in Excel don't break it.
 function findTable(ws) {
   let found = null;
   ws.eachRow((row, n) => {
@@ -101,8 +101,8 @@ function findTable(ws) {
 export async function importWorkbook(ExcelJS, buffer) {
   const wb = new ExcelJS.Workbook();
   try { await wb.xlsx.load(buffer); } catch { return { error: "Couldn't open that file. Is it an .xlsx spreadsheet?" }; }
-  const meta = wb.getWorksheet('_layout'), ws = wb.getWorksheet('Warehouse');
-  if (!meta || !ws || meta.getCell(1, 1).text !== MARKER) return { error: 'Not a file exported by this app.' };
+  const meta = wb.getWorksheet('_layout'), ws = wb.getWorksheet('Stock count'); // no Stock count sheet in a map-only file
+  if (!meta || meta.getCell(1, 1).text !== MARKER) return { error: 'Not a file exported by this app.' };
 
   let json = '';
   for (let r = 2; meta.getCell(r, 1).value != null; r++) json += meta.getCell(r, 1).value;
@@ -111,7 +111,7 @@ export async function importWorkbook(ExcelJS, buffer) {
   if (!isState(state)) return { error: 'The layout data in this file is damaged.' };
 
   const index = new Map(allParts(state).map(x => [key(x.row, x.box, x.partition), x.part]));
-  const table = findTable(ws);
+  const table = ws && findTable(ws);
   const skipped = [];
   if (table) for (let n = table.header + 1; n <= ws.rowCount; n++) {
     const [row, box, partition, , stock] = table.cols.map(c => ws.getCell(n, c).text.trim());
