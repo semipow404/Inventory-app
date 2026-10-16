@@ -22,7 +22,8 @@ export const LAYOUTS = new Map([
 export const newState = () => ({ styles: [], rows: [] });
 // full: what "full" means for this partition (for the usage colours). counts: the last COUNTS_KEPT counts, newest last.
 export const emptyPart = () => ({ style: '', number: '', color: '', stock: null, full: null, counts: [] });
-export const COUNTS_KEPT = 10;
+export const COUNTS_KEPT = 30;
+const addCount = (counts, stock, now) => [...counts, { at: now.toISOString(), stock }].slice(-COUNTS_KEPT);
 export const newStillage = () => ({ type: 'stillage', levels: LEVELS.map(() => ({ layout: '1', parts: [emptyPart()] })) });
 export const newRow = name => ({ name: name.trim(), columns: [newStillage()] });
 
@@ -112,8 +113,27 @@ export function makePart({ style, number, color, stock, full }, prev = emptyPart
   if (p.stock !== '' && !/^\d+$/.test(p.stock)) return { error: 'Stock must be a whole number, 0 or more.' };
   if (p.full !== '' && !/^[1-9]\d*$/.test(p.full)) return { error: 'Full must be a whole number, 1 or more.' };
   const s = p.stock === '' ? null : Number(p.stock);
-  const counts = s === null ? prev.counts : [...prev.counts, { at: now.toISOString(), stock: s }].slice(-COUNTS_KEPT);
+  const counts = s === null ? prev.counts : addCount(prev.counts, s, now);
   return { part: { ...p, stock: s, full: p.full === '' ? null : Number(p.full), counts } };
+}
+
+// Count mode: a new stock number for an existing product; everything else stays as it is.
+export function countPart(part, stock, now = new Date()) {
+  stock = stock.trim();
+  if (!/^\d+$/.test(stock)) return { error: 'Enter the count as a whole number, 0 or more.' };
+  return { part: { ...part, stock: Number(stock), counts: addCount(part.counts, Number(stock), now) } };
+}
+
+// The partition's stock over the last `days`: points { x, stock, dot } with x from 0 (`days` ago) to 1 (now).
+// It opens at the last count before the window (if any), has a dot per count inside it, and runs flat to now.
+export function stockLine(part, now = new Date(), days = 30) {
+  const end = now.getTime(), start = end - days * 864e5;
+  const counts = part.counts.map(c => ({ t: Date.parse(c.at), stock: c.stock })).filter(c => c.t <= end);
+  const before = counts.filter(c => c.t <= start).at(-1);
+  const line = before ? [{ x: 0, stock: before.stock, dot: false }] : [];
+  for (const c of counts) if (c.t > start) line.push({ x: (c.t - start) / (end - start), stock: c.stock, dot: true });
+  if (line.length) line.push({ x: 1, stock: line.at(-1).stock, dot: false });
+  return line;
 }
 
 // When this partition was last counted (ISO string), or null if its stock is blank.

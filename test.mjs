@@ -112,9 +112,10 @@ assert.deepEqual(L.makePart({ style: '', number: ' ', color: '', stock: '5', ful
   assert.equal(L.lastCounted(blank), null);
   assert.equal(blank.counts.length, 2);
   let many = first;
-  for (let i = 0; i < 15; i++) many = L.makePart(fields(String(i), ''), many, new Date(T0.getTime() + i * 1000)).part;
-  assert.equal(many.counts.length, 10);                                  // only the last 10 are kept
-  assert.equal(many.counts.at(-1).stock, 14);
+  for (let i = 0; i < 35; i++) many = L.makePart(fields(String(i), ''), many, new Date(T0.getTime() + i * 1000)).part;
+  assert.equal(many.counts.length, 30);                                  // only the last 30 are kept
+  assert.equal(many.counts[0].stock, 5);
+  assert.equal(many.counts.at(-1).stock, 34);
   assert.equal(many.full, null);
   assert.match(L.makePart(fields('1', '0')).error, /Full/);              // full must be a whole number of 1 or more
   assert.match(L.makePart(fields('1', '2.5')).error, /Full/);
@@ -125,6 +126,43 @@ assert.deepEqual(L.makePart({ style: '', number: ' ', color: '', stock: '5', ful
   assert.equal(L.usage({ ...first, stock: 0 }), 0);
   assert.equal(L.usage({ ...first, full: null }), null);
   assert.equal(L.usage({ ...first, stock: null }), null);
+}
+
+// --- Count mode: a quick count keeps the product and its Full number, and stamps a count
+{
+  const before = P('LSW', '017', 'MC', 16, { full: 20, counts: [{ at: T0.toISOString(), stock: 16 }] });
+  const T1 = new Date('2026-10-17T08:00:00Z');
+  const { part } = L.countPart(before, ' 12 ', T1);
+  assert.deepEqual(part, { ...before, stock: 12, counts: [...before.counts, { at: T1.toISOString(), stock: 12 }] });
+  assert.equal(L.lastCounted(part), T1.toISOString());
+  assert.match(L.countPart(before, '').error, /whole number/);
+  assert.match(L.countPart(before, '1.5').error, /whole number/);
+  assert.match(L.countPart(before, '-2').error, /whole number/);
+}
+
+// --- 30-day stock line: x runs from 0 (30 days ago) to 1 (now), with a dot at each count and flat after the latest
+{
+  const now = new Date('2026-10-31T12:00:00Z');
+  const ago = d => new Date(now.getTime() - d * 864e5).toISOString();
+  const round = line => line.map(p => ({ ...p, x: Math.round(p.x * 1000) / 1000 }));
+  // Your example: 16, still 16 ten days later, about 15 ten days after that, 0 at the latest count
+  const mc = P('LSW', '017', 'MC', 0, { full: 20, counts: [
+    { at: ago(40), stock: 16 }, { at: ago(20), stock: 16 }, { at: ago(10), stock: 15 }, { at: ago(0), stock: 0 }] });
+  assert.deepEqual(round(L.stockLine(mc, now)), [
+    { x: 0, stock: 16, dot: false },                 // the stock when the 30 days began (counted 40 days ago)
+    { x: 0.333, stock: 16, dot: true },
+    { x: 0.667, stock: 15, dot: true },
+    { x: 1, stock: 0, dot: true },
+    { x: 1, stock: 0, dot: false },
+  ]);
+  // First ever count inside the window: the line starts there, not at the left edge
+  const fresh = P('LAN', '042', 'W', 7, { counts: [{ at: ago(15), stock: 9 }, { at: ago(5), stock: 7 }] });
+  assert.deepEqual(round(L.stockLine(fresh, now)), [
+    { x: 0.5, stock: 9, dot: true }, { x: 0.833, stock: 7, dot: true }, { x: 1, stock: 7, dot: false }]);
+  // Only counted long ago: a flat line at that level; never counted: no line
+  assert.deepEqual(round(L.stockLine(P('', '', 'KK', 3, { counts: [{ at: ago(60), stock: 3 }] }), now)),
+    [{ x: 0, stock: 3, dot: false }, { x: 1, stock: 3, dot: false }]);
+  assert.deepEqual(L.stockLine(P('', '', 'KK', null), now), []);
 }
 
 // --- Row names
@@ -322,7 +360,7 @@ const sheets = wb => wb.worksheets.map(s => s.name);
   assert.match(await tamper(s => { lsw(s).parts[0].counts = 'x'; }), /damaged/);
   assert.match(await tamper(s => { lsw(s).parts[0].counts[0].stock = -1; }), /damaged/);
   assert.match(await tamper(s => { lsw(s).parts[0].counts[0].at = '<img src=x>'; }), /damaged/);
-  assert.match(await tamper(s => { lsw(s).parts[0].counts = Array(11).fill(lsw(s).parts[0].counts[0]); }), /damaged/);
+  assert.match(await tamper(s => { lsw(s).parts[0].counts = Array(31).fill(lsw(s).parts[0].counts[0]); }), /damaged/);
   assert.match(await tamper(s => { s.rows[0].columns[1].levels.pop(); }), /damaged/);
   assert.match(await tamper(s => { s.rows[0].columns[0] = { type: 'shelf' }; }), /damaged/);
   assert.match(await tamper(s => { s.rows[0].name = 42; }), /damaged/);
