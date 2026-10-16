@@ -158,8 +158,16 @@ function listHtml(items, scrollKey) {
   </table></div>`;
 }
 
+// Moving mode: taps pick partitions instead of opening the close-up. First tap picks a product, the second swaps.
+let moving = false, picked = null; // picked: { r, c, l, p }
+const samePart = (a, b) => a.r === b.r && a.c === b.c && a.l === b.l && a.p === b.p;
+const partAt = ({ r, c, l, p }) => state.rows[r].columns[c].levels[l].parts[p];
+
 function rowHtml(row, r, q) {
   const nums = L.columnNumbers(row);
+  const boxAttrs = (c, l) => (moving ? '' : `role="button" data-action="open" data-r="${r}" data-c="${c}" data-l="${l}"`);
+  const pickAttrs = (c, l) => (moving ? p => `role="button" data-action="pick" data-r="${r}" data-c="${c}" data-l="${l}" data-p="${p}"${
+    picked && samePart(picked, { r, c, l, p }) ? ' data-picked' : ''}` : undefined);
   const adders = side => `<div class="adders">
       <button data-action="add-col" data-r="${r}" data-type="stillage" data-side="${side}">Add Stillage</button>
       <button data-action="add-col" data-r="${r}" data-type="space" data-side="${side}">Add Space</button>
@@ -167,7 +175,7 @@ function rowHtml(row, r, q) {
   const columns = row.columns.map((col, c) => col.type === 'space'
     ? `<button class="walkway" data-action="edit-space" data-r="${r}" data-c="${c}">${esc(col.name)}</button>`
     : `<div class="col">${col.levels.map((lvl, l) =>
-        boxHtml(lvl, L.LEVELS[l] + nums[c], q, `role="button" data-action="open" data-r="${r}" data-c="${c}" data-l="${l}"`)).join('')}</div>`).join('');
+        boxHtml(lvl, L.LEVELS[l] + nums[c], q, boxAttrs(c, l), pickAttrs(c, l))).join('')}</div>`).join('');
   return `<section class="row">
     <h2><button class="row-name" data-action="edit-row" data-r="${r}">${esc(row.name)}</button></h2>
     <div class="row-scroll" data-scroll="row-${r}">${adders('left')}${columns}${adders('right')}</div>
@@ -178,13 +186,16 @@ Object.assign(views, {
   warehouse() {
     const q = query();
     const items = L.allParts(state).filter(x => (L.isSearching(q) ? L.matches(x.part, q) : L.hasProduct(x.part)));
+    const hint = picked ? `Now tap where ${esc(L.code(partAt(picked)))} should go (tap it again to cancel)` : 'Tap a product to move';
     return { title: 'Warehouse', search: true, html: `
+      ${moving ? `<p class="move-hint">${hint}</p>` : ''}
       <div class="map${state.rows.length ? '' : ' empty'}" data-scroll="map">
         ${state.rows.map((row, r) => rowHtml(row, r, q)).join('')}
         <button class="add-row" data-action="new-row" aria-label="Add row">+</button>
       </div>
       <div class="usage-bar">
         <button class="usage-toggle${usageOn ? ' on' : ''}" data-action="toggle-usage" aria-pressed="${usageOn}">Stillage usage: ${usageOn ? 'ON' : 'OFF'}</button>
+        <button class="usage-toggle move${moving ? ' on' : ''}" data-action="toggle-move" aria-pressed="${moving}">Move: ${moving ? 'ON' : 'OFF'}</button>
       </div>${listHtml(items, 'list')}` };
   },
 });
@@ -229,6 +240,14 @@ Object.assign(actions, {
     render();
   },
   open({ r, c, l }) { location.hash = `#stillage/${r}/${c}/${l}`; },
+  'toggle-move'() { moving = !moving; picked = null; render(); },
+  pick({ r, c, l, p }) {
+    const at = { r: +r, c: +c, l: +l, p: +p };
+    if (picked && samePart(picked, at)) picked = null;                    // tapped again: un-pick
+    else if (picked) { L.swapParts(state, picked, at); picked = null; return commit(); }
+    else if (L.hasProduct(partAt(at))) picked = at;                        // only a product can be picked up
+    render();
+  },
 });
 
 // ---- Stillage close-up
