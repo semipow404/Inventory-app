@@ -54,6 +54,13 @@ header h1 { flex: 1; margin: 0; text-align: center; font-size: 1.6rem; font-weig
 .parts[data-n="6"] .part, .parts[data-n="9"] .part { font-size: .55rem; }
 .parts[data-n="12"] .part, .parts[data-n="16"] .part { font-size: .45rem; }
 .part.hit { background: var(--hit); }
+/* Stillage usage view: colour comes inline from app.js; search matches get an outline instead of green */
+.parts.usage .part { flex-direction: column; color: #fff; }
+.parts.usage .part b { display: block; }
+.parts.usage .part.hit { outline: 3px solid #fff; outline-offset: -3px; }
+.usage-bar { flex: none; display: flex; justify-content: center; padding: 6px; }
+.usage-toggle { background: none; color: var(--text); border: 2px solid var(--line); border-radius: 16px; padding: 6px 16px; font-size: .9rem; }
+.usage-toggle.on { background: var(--hit); border-color: var(--hit); }
 .walkway { flex: none; width: 70px; padding: 4px; background: none; border: 0; color: var(--text); overflow-wrap: anywhere; }
 .adders { flex: none; display: flex; flex-direction: column; justify-content: space-around; padding: 0 8px; }
 .adders button { width: 72px; padding: 6px 4px; background: none; color: var(--text); border: 2px solid #fff; border-radius: 6px; font-size: .8rem; }
@@ -86,6 +93,8 @@ dialog input, dialog select { padding: 6px; border-radius: 6px; border: 0; }
 .check input { width: 22px; height: 22px; }
 .code-fields { display: flex; gap: 6px; margin-bottom: 12px; }
 .code-fields > * { flex: 1; min-width: 0; }
-.stock input { width: 6em; margin-left: 8px; }
+.numbers { display: flex; gap: 14px; }
+.stock input { width: 4.5em; margin-left: 6px; }
+#p-counted { margin: 10px 0 0; font-size: .85rem; color: #ddd; }
 dialog menu { display: flex; flex-direction: row-reverse; gap: 8px; margin: 16px 0 0; padding: 0; }
 .error { min-height: 1em; margin: 6px 0 0; color: #ff8080; }

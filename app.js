@@ -126,22 +126,35 @@ function ask(dialog, check = () => null) {
 const query = () => ({ style: $('#q-style').value, number: $('#q-number').value.trim(), color: $('#q-color').value.trim() });
 $('#search').addEventListener('input', render);
 
+// Stillage usage colours: a per-phone setting, so it lives outside the warehouse data (and out of exports).
+const USAGE_KEY = 'inventory-app-usage';
+let usageOn = (() => { try { return localStorage.getItem(USAGE_KEY) === '1'; } catch { return false; } })();
+// Red (empty) → yellow → green (full); grey when not counted or no "full" number.
+const usageColour = p => { const u = L.usage(p); return u === null ? '#2a2f45' : `hsl(${Math.round(120 * u)} 75% 40%)`; };
+
+const shortDate = iso => (iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '');
+const longDate = iso => new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
 // Partitions sit on the same 12×12 grid the Excel map uses (L.LAYOUTS), as CSS grid areas.
 function boxHtml(lvl, label, q, boxAttrs, partAttrs = () => '') {
   const blocks = L.LAYOUTS.get(lvl.layout);
   return `<div class="box" ${boxAttrs}>
     <span class="label">${label}</span>
-    <div class="parts" data-n="${lvl.parts.length}">${lvl.parts.map((p, i) => {
+    <div class="parts${usageOn ? ' usage' : ''}" data-n="${lvl.parts.length}">${lvl.parts.map((p, i) => {
       const [x, y, w, h] = blocks[i];
-      return `<div class="part${L.matches(p, q) ? ' hit' : ''}" style="grid-area:${y + 1}/${x + 1}/span ${h}/span ${w}" ${partAttrs(i)}>${esc(L.code(p) || 'NA')}</div>`;
+      const area = `grid-area:${y + 1}/${x + 1}/span ${h}/span ${w}`;
+      const body = usageOn && L.hasProduct(p)
+        ? `${esc(L.code(p))}<b>${esc(p.stock ?? '–')}${p.full ? ` / ${esc(p.full)}` : ''}</b>`
+        : esc(L.code(p) || 'NA');
+      return `<div class="part${L.matches(p, q) ? ' hit' : ''}" style="${area}${usageOn ? `;background:${usageColour(p)}` : ''}" ${partAttrs(i)}>${body}</div>`;
     }).join('')}</div>
   </div>`;
 }
 
 function listHtml(items, scrollKey) {
   return `<div class="list" data-scroll="${scrollKey}"><table>
-    <thead><tr><th>Code</th><th>Location</th><th>Box</th><th>Stock</th></tr></thead>
-    <tbody>${items.map(x => `<tr><td>${esc(L.code(x.part))}</td><td>${esc(x.row)}</td><td>${x.box}</td><td>${esc(x.part.stock ?? '')}</td></tr>`).join('')}</tbody>
+    <thead><tr><th>Code</th><th>Location</th><th>Box</th><th>Stock</th><th>Counted</th></tr></thead>
+    <tbody>${items.map(x => `<tr><td>${esc(L.code(x.part))}</td><td>${esc(x.row)}</td><td>${x.box}</td><td>${esc(x.part.stock ?? '')}</td><td>${shortDate(L.lastCounted(x.part))}</td></tr>`).join('')}</tbody>
   </table></div>`;
 }
 
@@ -169,6 +182,9 @@ Object.assign(views, {
       <div class="map${state.rows.length ? '' : ' empty'}" data-scroll="map">
         ${state.rows.map((row, r) => rowHtml(row, r, q)).join('')}
         <button class="add-row" data-action="new-row" aria-label="Add row">+</button>
+      </div>
+      <div class="usage-bar">
+        <button class="usage-toggle${usageOn ? ' on' : ''}" data-action="toggle-usage" aria-pressed="${usageOn}">Stillage usage: ${usageOn ? 'ON' : 'OFF'}</button>
       </div>${listHtml(items, 'list')}` };
   },
 });
@@ -207,6 +223,11 @@ Object.assign(actions, {
     commit();
   },
   'add-col'({ r, type, side }) { L.addColumn(state.rows[r], type, side); commit(); },
+  'toggle-usage'() {
+    usageOn = !usageOn;
+    try { localStorage.setItem(USAGE_KEY, usageOn ? '1' : '0'); } catch { /* still works for this visit */ }
+    render();
+  },
   open({ r, c, l }) { location.hash = `#stillage/${r}/${c}/${l}`; },
 });
 
@@ -242,10 +263,14 @@ Object.assign(actions, {
     $('#p-number').value = part.number;
     $('#p-color').value = part.color;
     $('#p-stock').value = part.stock ?? '';
+    $('#p-full').value = part.full ?? '';
+    const counted = L.lastCounted(part);
+    $('#p-counted').textContent = counted ? `Last counted ${longDate(counted)}` : 'Not counted yet';
     let made;
     const check = () => (made = L.makePart({
-      style: $('#p-style').value, number: $('#p-number').value, color: $('#p-color').value, stock: $('#p-stock').value,
-    })).error;
+      style: $('#p-style').value, number: $('#p-number').value, color: $('#p-color').value,
+      stock: $('#p-stock').value, full: $('#p-full').value,
+    }, part)).error;
     if (await ask(partDialog, check) !== 'save') return;
     lvl.parts[p] = made.part;
     commit();
