@@ -28,22 +28,66 @@ assert.ok(!L.matches(p, { style: '', number: '', color: '' }));
 assert.ok(!L.matches(L.emptyPart(), { style: '', number: '', color: '' }));
 assert.ok(!L.isSearching({ style: '', number: '', color: '' }));
 
-// --- Partitions
-const lvl = { parts: [L.emptyPart()] };
-L.setPartitions(lvl, 4);
+// --- Partition layouts: each tiles the stillage's 12×12 grid exactly once, numbered left→right then top→bottom
+assert.deepEqual([...L.LAYOUTS.keys()], ['1', '2II', '2=', '3II', '3T', '4', '4T', '6', '9', '12', '16']);
+assert.deepEqual([...L.LAYOUTS.values()].map(b => b.length), [1, 2, 2, 3, 3, 4, 4, 6, 9, 12, 16]);
+for (const [id, blocks] of L.LAYOUTS) {
+  const cover = Array(144).fill(0);
+  blocks.forEach(([x, y, w, h]) => { for (let i = x; i < x + w; i++) for (let j = y; j < y + h; j++) cover[j * 12 + i]++; });
+  assert.ok(cover.every(n => n === 1), `${id} covers every cell exactly once`);
+  const order = blocks.map(([x, y]) => y * 12 + x);
+  assert.deepEqual(order, [...order].sort((a, b) => a - b), `${id} is numbered left→right, top→bottom`);
+}
+assert.deepEqual(L.LAYOUTS.get('2='), [[0, 0, 12, 6], [0, 6, 12, 6]]);                 // two stacked
+assert.deepEqual(L.LAYOUTS.get('3T'), [[0, 0, 12, 6], [0, 6, 6, 6], [6, 6, 6, 6]]);    // one on top, two below
+assert.deepEqual(L.LAYOUTS.get('4T'), [[0, 0, 12, 6], [0, 6, 4, 6], [4, 6, 4, 6], [8, 6, 4, 6]]);
+assert.deepEqual(L.LAYOUTS.get('12')[4], [0, 4, 3, 4]);                                // 4 across × 3 down
+const lvl = L.newStillage().levels[0];
+assert.equal(lvl.layout, '1');
+L.setLayout(lvl, '2II');
+lvl.parts[1] = { ...p };
+L.setLayout(lvl, '2=');                                  // same count: products stay put
+assert.equal(lvl.layout, '2=');
+assert.deepEqual(lvl.parts, [L.emptyPart(), p]);
+L.setLayout(lvl, '16');
+assert.equal(lvl.parts.length, 16);
+lvl.parts[15] = { ...p };
+assert.ok(L.dropsProducts(lvl, 12));
+assert.ok(!L.dropsProducts(lvl, 16));
+L.setLayout(lvl, '4T');
 assert.equal(lvl.parts.length, 4);
-lvl.parts[3] = { ...p };
-assert.ok(L.dropsProducts(lvl, 3));
-assert.ok(!L.dropsProducts(lvl, 4));
-L.setPartitions(lvl, 2);
-assert.deepEqual(lvl.parts, [L.emptyPart(), L.emptyPart()]);
+assert.deepEqual(lvl.parts[1], p);
+
+// --- Spaces are named, "Walkway" by default
+const spaced = L.newRow('Spaced');
+L.addColumn(spaced, 'space', 'left');
+assert.deepEqual(spaced.columns[0], { type: 'space', name: 'Walkway' });
+
+// --- Data saved before named layouts and space names still loads
+const parts = n => Array.from({ length: n }, () => L.emptyPart());
+const old = { styles: [], rows: [{ name: 'R', columns: [
+  { type: 'space' },
+  { type: 'stillage', levels: [{ parts: parts(1) }, { parts: parts(2) }, { parts: parts(3) }] },
+  { type: 'stillage', levels: [{ parts: parts(4) }, { parts: parts(1) }, { parts: parts(1) }] },
+] }] };
+const migrated = L.migrate(structuredClone(old));
+assert.equal(migrated.rows[0].columns[0].name, 'Walkway');
+assert.deepEqual(migrated.rows[0].columns[1].levels.map(x => x.layout), ['1', '2II', '3II']);
+assert.equal(migrated.rows[0].columns[2].levels[0].layout, '4');
+assert.deepEqual(L.migrate(structuredClone(migrated)), migrated); // already-current data is left alone
+assert.doesNotThrow(() => L.migrate({ rows: [null, { columns: 'x' }] })); // garbage is left for validation to reject
 
 // --- Product pop-up values
 assert.deepEqual(L.makePart({ style: 'LSW', number: ' 022 ', color: 'wrbf', stock: '12' }).part,
   { style: 'LSW', number: '022', color: 'WRBF', stock: 12 });
 assert.equal(L.makePart({ style: 'LSW', number: '022', color: '', stock: '' }).part.stock, null);
 assert.equal(L.makePart({ style: 'LSW', number: '022', color: '', stock: '0' }).part.stock, 0);
-assert.ok(L.makePart({ style: '', number: '022', color: '', stock: '' }).error);
+// Part of a code is enough, e.g. colour only
+assert.deepEqual(L.makePart({ style: '', number: '', color: 'kk', stock: '3' }).part, { style: '', number: '', color: 'KK', stock: 3 });
+assert.deepEqual(L.makePart({ style: '', number: '022', color: '', stock: '' }).part, { style: '', number: '022', color: '', stock: null });
+const kk = { style: '', number: '', color: 'KK', stock: 3 };
+assert.ok(L.matches(kk, { style: '', number: '', color: 'kk' }));
+assert.ok(!L.matches(kk, { style: 'LSW', number: '', color: 'KK' }));
 assert.ok(L.makePart({ style: 'LSW', number: '022', color: '', stock: '-1' }).error);
 assert.ok(L.makePart({ style: 'LSW', number: '022', color: '', stock: '2.5' }).error);
 assert.deepEqual(L.makePart({ style: '', number: ' ', color: '', stock: '5' }).part, L.emptyPart());
@@ -79,38 +123,54 @@ function sample() {
   L.addColumn(mid, 'space', 'left');        // columns: [walkway, stillage 1]
   L.addColumn(mid, 'stillage', 'right');    // columns: [walkway, stillage 1, stillage 2]
   const one = mid.columns[1], two = mid.columns[2];
-  L.setPartitions(one.levels[0], 4);
+  L.setLayout(one.levels[0], '4');
   one.levels[0].parts[0] = { style: 'LSW', number: '022', color: 'BR', stock: 10 };
   one.levels[0].parts[3] = { style: 'LSW', number: '021', color: 'WKOF', stock: null };
-  L.setPartitions(two.levels[1], 2);
-  L.setPartitions(two.levels[2], 3);
+  L.setLayout(two.levels[1], '2II');
+  L.setLayout(two.levels[2], '3II');
   two.levels[2].parts[2] = { style: 'LAN', number: '911', color: 'FG', stock: 0 };
   back.columns[0].levels[0].parts[0] = { style: 'LAN', number: '042', color: 'W', stock: 7 };
+  mid.columns[0].name = 'Fire exit';
+  L.setLayout(back.columns[0].levels[1], '16');
+  back.columns[0].levels[1].parts[15] = { style: '', number: '', color: 'KK', stock: 11 }; // colour-only code
+  L.setLayout(back.columns[0].levels[2], '3T');
   return s;
 }
 
-const W = 6, col = i => 2 + i * W; // each stillage / table field spans 6 Excel columns starting at column B
+// Each stillage is a 12×12 block of Excel cells per level (the layout grid); table fields line up with stillage columns.
+const G = 12, col = i => 2 + i * G;
 const opened = async buf => { const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf); return wb; };
 const headerRow = ws => { let h = 0; ws.eachRow((r, n) => { if (!h && r.getCell(col(0)).text === 'Row' && r.getCell(col(4)).text === 'Stock') h = n; }); return h; };
 
-// --- Map layout: Mid Row name in row 1, column numbers in row 2, levels from row 3 (2 Excel rows per level)
+// --- Map layout: row name, column numbers, then levels a/b/c of 12 Excel rows each
 {
   const wb = await opened(await exportWorkbook(ExcelJS, sample(), { date: new Date(2026, 9, 15) }));
   const ws = wb.getWorksheet('Warehouse');
+  const at = (r, c) => ws.getCell(r, c).text;
   assert.equal(wb.getWorksheet('_layout').state, 'hidden');
-  assert.equal(ws.getCell(1, 1).text, 'Mid Row');
-  assert.equal(ws.getCell(2, col(1)).text, '1');
-  assert.equal(ws.getCell(2, col(2)).text, '2');
-  assert.equal(ws.getCell(3, 1).text, 'a');
-  assert.equal(ws.getCell(3, col(0)).text, 'Walkway');
-  assert.equal(ws.getCell(8, col(0) + 5).text, 'Walkway');            // walkway covers 6 columns × 6 rows
-  assert.equal(ws.getCell(3, col(1)).text, 'LSW022BR');               // 4-way: top-left is 3 wide × 1 high
-  assert.equal(ws.getCell(3, col(1) + 2).text, 'LSW022BR');
-  assert.equal(ws.getCell(3, col(1) + 3).text, 'NA');                 // top-right
-  assert.equal(ws.getCell(4, col(1) + 3).text, 'LSW021WKOF');         // bottom-right
-  assert.equal(ws.getCell(7, col(2) + 4).text, 'LAN911FG');           // 3-way, level c, third block (2 wide × 2 high)
-  assert.equal(ws.getCell(8, col(2) + 5).text, 'LAN911FG');
-  assert.equal(ws.getCell(5, col(2)).text, 'NA');                     // 2-way, level b, left half
+  // Mid Row: name row 1, numbers row 2, level a rows 3–14, b 15–26, c 27–38
+  assert.equal(at(1, 1), 'Mid Row');
+  assert.equal(at(2, col(1)), '1');
+  assert.equal(at(2, col(2)), '2');
+  assert.equal(at(3, 1), 'a');
+  assert.equal(at(15, 1), 'b');
+  assert.equal(at(3, col(0)), 'Fire exit');                          // named space covers all three levels
+  assert.equal(at(38, col(0) + 11), 'Fire exit');
+  assert.equal(at(3, col(1)), 'LSW022BR');                           // '4': top-left is 6×6
+  assert.equal(at(8, col(1) + 5), 'LSW022BR');
+  assert.equal(at(3, col(1) + 6), 'NA');                             // top-right
+  assert.equal(at(9, col(1) + 6), 'LSW021WKOF');                     // bottom-right
+  assert.equal(at(15, col(2)), 'NA');                                // '2II', level b, left half
+  assert.equal(at(27, col(2) + 8), 'LAN911FG');                      // '3II', level c, third block (4×12)
+  assert.equal(at(38, col(2) + 11), 'LAN911FG');
+  // Back Row starts after Mid Row's 36 level rows + 1 blank: name row 40, numbers 41, level a 42–53, b 54–65, c 66–77
+  assert.equal(at(40, 1), 'Back Row');
+  assert.equal(at(42, col(0)), 'LAN042W');
+  assert.equal(at(63, col(0) + 9), 'KK');                            // '16', level b, partition 16 (3×3, bottom-right)
+  assert.equal(at(65, col(0) + 11), 'KK');
+  assert.equal(at(62, col(0) + 9), 'NA');                            // partition 12, just above
+  assert.equal(at(71, col(0) + 11), 'NA');                           // '3T', level c: top block is 12×6
+  assert.equal(at(72, col(0) + 6), 'NA');                            // bottom-right block
   // --- Count table: walking order, blank stock for uncounted
   const h = headerRow(ws);
   assert.ok(h > 0, 'count table header found');
@@ -120,7 +180,39 @@ const headerRow = ws => { let h = 0; ws.eachRow((r, n) => { if (!h && r.getCell(
   assert.deepEqual(line(h + 2), ['Mid Row', 'a1', '4', 'LSW021WKOF', '']);
   assert.deepEqual(line(h + 3), ['Mid Row', 'c2', '3', 'LAN911FG', '0']);
   assert.deepEqual(line(h + 4), ['Back Row', 'a1', '1', 'LAN042W', '7']);
-  assert.equal(ws.getCell(h + 5, col(0)).text, '');
+  assert.deepEqual(line(h + 5), ['Back Row', 'b1', '16', 'KK', '11']);
+  assert.equal(ws.getCell(h + 6, col(0)).text, '');
+}
+
+// --- Export options: map only, or count only; both files still import in full (layout travels in the hidden sheet)
+{
+  const mapOnly = await opened(await exportWorkbook(ExcelJS, sample(), { count: false }));
+  assert.equal(headerRow(mapOnly.getWorksheet('Warehouse')), 0, 'map-only file has no count table');
+  assert.equal(mapOnly.getWorksheet('Warehouse').getCell(1, 1).text, 'Mid Row');
+  const countOnly = await opened(await exportWorkbook(ExcelJS, sample(), { map: false }));
+  const ws = countOnly.getWorksheet('Warehouse');
+  assert.match(ws.getCell(1, 1).text, /Inventory count/, 'count-only file starts with the count');
+  assert.equal(headerRow(ws), 2);
+  for (const wb of [mapOnly, countOnly]) {
+    assert.deepEqual(await importWorkbook(ExcelJS, await wb.xlsx.writeBuffer()), { state: sample(), skipped: [] });
+  }
+}
+
+// --- Files from the first release (6-column table, no layout names or space names) still import
+{
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Warehouse');
+  ['Row', 'Box', 'Partition', 'Code', 'Stock'].forEach((h, i) => { ws.getCell(9, 2 + i * 6).value = h; });
+  ['Mid Row', 'a1', 1, 'LSW022BR', 42].forEach((v, i) => { ws.getCell(10, 2 + i * 6).value = v; });
+  const meta = wb.addWorksheet('_layout', { state: 'hidden' });
+  meta.getCell(1, 1).value = 'INVENTORY-APP-V1';
+  meta.getCell(2, 1).value = JSON.stringify({ styles: ['LSW'], rows: [{ name: 'Mid Row', columns: [{ type: 'space' }, { type: 'stillage', levels: [
+    { parts: [{ style: 'LSW', number: '022', color: 'BR', stock: 10 }, L.emptyPart()] }, { parts: [L.emptyPart()] }, { parts: [L.emptyPart()] }] }] }] });
+  const out = await importWorkbook(ExcelJS, await wb.xlsx.writeBuffer());
+  assert.deepEqual(out.skipped, []);
+  assert.equal(out.state.rows[0].columns[0].name, 'Walkway');
+  assert.deepEqual(out.state.rows[0].columns[1].levels.map(x => x.layout), ['2II', '1', '1']);
+  assert.equal(out.state.rows[0].columns[1].levels[0].parts[0].stock, 42); // read from the old table columns
 }
 
 // --- Round trip with edits a user might make in Excel (Review Focus 2 and 3)
@@ -133,10 +225,10 @@ const headerRow = ws => { let h = 0; ws.eachRow((r, n) => { if (!h && r.getCell(
   ws.getCell(h + 4, col(0)).value = '  back row ';      // LAN042W: different case/spaces still match
   ws.getCell(h + 4, col(1)).value = 'A1';
   ws.getCell(h + 4, col(4)).value = null;               // cleared → not counted
-  ws.getCell(h + 5, col(0)).value = 'Mid Row';          // a line for a box that doesn't exist
-  ws.getCell(h + 5, col(1)).value = 'b9';
-  ws.getCell(h + 5, col(2)).value = 1;
-  ws.getCell(h + 5, col(4)).value = 5;
+  ws.getCell(h + 6, col(0)).value = 'Mid Row';          // a line for a box that doesn't exist
+  ws.getCell(h + 6, col(1)).value = 'b9';
+  ws.getCell(h + 6, col(2)).value = 1;
+  ws.getCell(h + 6, col(4)).value = 5;
   const out = await importWorkbook(ExcelJS, await wb.xlsx.writeBuffer());
   const expected = sample();
   expected.rows[0].columns[1].levels[0].parts[0].stock = 99;
@@ -180,7 +272,10 @@ const headerRow = ws => { let h = 0; ws.eachRow((r, n) => { if (!h && r.getCell(
   assert.match(await tamper(s => { lsw(s).parts[0].stock = -3; }), /damaged/);
   assert.match(await tamper(s => { lsw(s).parts[0].color = { x: 1 }; }), /damaged/);
   assert.match(await tamper(s => { lsw(s).parts = []; }), /damaged/);
-  assert.match(await tamper(s => { lsw(s).parts.push(L.emptyPart()); }), /damaged/); // 5 partitions
+  assert.match(await tamper(s => { lsw(s).parts.push(L.emptyPart()); }), /damaged/); // 5 partitions for layout '4'
+  assert.match(await tamper(s => { lsw(s).layout = '5'; }), /damaged/);
+  assert.match(await tamper(s => { lsw(s).layout = 'constructor'; }), /damaged/);
+  assert.match(await tamper(s => { s.rows[0].columns[0].name = ['<b>x</b>']; }), /damaged/);
   assert.match(await tamper(s => { s.rows[0].columns[1].levels.pop(); }), /damaged/);
   assert.match(await tamper(s => { s.rows[0].columns[0] = { type: 'shelf' }; }), /damaged/);
   assert.match(await tamper(s => { s.rows[0].name = 42; }), /damaged/);
@@ -195,7 +290,7 @@ const headerRow = ws => { let h = 0; ws.eachRow((r, n) => { if (!h && r.getCell(
   big.rows.push(L.newRow('Big Row'));
   for (let i = 0; i < 200; i++) L.addColumn(big.rows[0], 'stillage', 'right');
   big.rows[0].columns.forEach((col, c) => col.levels.forEach(lvl => {
-    L.setPartitions(lvl, 4);
+    L.setLayout(lvl, '4');
     lvl.parts = lvl.parts.map((_, p) => ({ style: 'LSW', number: String(c).padStart(3, '0'), color: 'C' + p, stock: c * 100 + p }));
   }));
   const t = Date.now();

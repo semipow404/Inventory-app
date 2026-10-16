@@ -1,9 +1,27 @@
 // Pure warehouse logic: no DOM, no storage. Used by app.js, excel.js and test.mjs.
 export const LEVELS = ['a', 'b', 'c'];
 
+// Partition layouts in dropdown order. Each block is [x, y, w, h] on a 12×12 grid (12 divides by 2, 3 and 4),
+// numbered left→right then top→bottom. The app and the Excel map both draw from this.
+const grid = (cols, rows) => Array.from({ length: cols * rows }, (_, i) =>
+  [(i % cols) * (12 / cols), Math.floor(i / cols) * (12 / rows), 12 / cols, 12 / rows]);
+export const LAYOUTS = new Map([
+  ['1', grid(1, 1)],
+  ['2II', grid(2, 1)],
+  ['2=', grid(1, 2)],
+  ['3II', grid(3, 1)],
+  ['3T', [[0, 0, 12, 6], [0, 6, 6, 6], [6, 6, 6, 6]]],
+  ['4', grid(2, 2)],
+  ['4T', [[0, 0, 12, 6], [0, 6, 4, 6], [4, 6, 4, 6], [8, 6, 4, 6]]],
+  ['6', grid(3, 2)],
+  ['9', grid(3, 3)],
+  ['12', grid(4, 3)],
+  ['16', grid(4, 4)],
+]);
+
 export const newState = () => ({ styles: [], rows: [] });
 export const emptyPart = () => ({ style: '', number: '', color: '', stock: null });
-export const newStillage = () => ({ type: 'stillage', levels: LEVELS.map(() => ({ parts: [emptyPart()] })) });
+export const newStillage = () => ({ type: 'stillage', levels: LEVELS.map(() => ({ layout: '1', parts: [emptyPart()] })) });
 export const newRow = name => ({ name: name.trim(), columns: [newStillage()] });
 
 export const code = p => p.style + p.number + p.color;
@@ -45,23 +63,39 @@ export function rowNameError(state, name, except = null) {
 }
 
 export function addColumn(row, type, side) {
-  const col = type === 'space' ? { type: 'space' } : newStillage();
+  const col = type === 'space' ? { type: 'space', name: 'Walkway' } : newStillage();
   if (side === 'left') row.columns.unshift(col);
   else row.columns.push(col);
 }
 
 export const dropsProducts = (level, n) => level.parts.slice(n).some(hasProduct);
 
-export function setPartitions(level, n) {
+// Keeps partitions by number: switching between layouts with the same count keeps every product.
+export function setLayout(level, id) {
+  const n = LAYOUTS.get(id).length;
   while (level.parts.length < n) level.parts.push(emptyPart());
   level.parts.length = n;
+  level.layout = id;
 }
 
-// Turns the product pop-up's raw field values into a partition, or an error message.
+// Fills in fields added after the first release so older saves and exports still load.
+// Anything malformed is left as it is for import validation to reject.
+const FIRST_LAYOUTS = ['1', '2II', '3II', '4']; // the first release had only these, picked by partition count
+export function migrate(state) {
+  const list = v => (Array.isArray(v) ? v : []);
+  for (const row of list(state?.rows)) for (const col of list(row?.columns)) {
+    if (col?.type === 'space' && col.name === undefined) col.name = 'Walkway';
+    if (col?.type === 'stillage') for (const lvl of list(col.levels)) {
+      if (lvl && lvl.layout === undefined && Array.isArray(lvl.parts)) lvl.layout = FIRST_LAYOUTS[lvl.parts.length - 1];
+    }
+  }
+  return state;
+}
+
+// Turns the product pop-up's raw field values into a partition, or an error message. Any part of the code may be blank.
 export function makePart({ style, number, color, stock }) {
   const p = { style, number: number.trim().toUpperCase(), color: color.trim().toUpperCase(), stock: stock.trim() };
   if (!p.style && !p.number && !p.color) return { part: emptyPart() };
-  if (!p.style) return { error: 'Pick a style.' };
   if (p.stock !== '' && !/^\d+$/.test(p.stock)) return { error: 'Stock must be a whole number, 0 or more.' };
   return { part: { ...p, stock: p.stock === '' ? null : Number(p.stock) } };
 }
