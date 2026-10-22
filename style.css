@@ -61,6 +61,7 @@ header h1 { flex: 1; margin: 0; text-align: center; font-size: 1.6rem; font-weig
 .usage-bar { flex: none; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; padding: 6px; }
 .move-hint { flex: none; margin: 0; padding: 6px 10px; text-align: center; background: #c79100; color: #000; }
 .part[data-picked] { outline: 3px dashed #ffd400; outline-offset: -3px; }
+.box[data-picked] { outline: 4px dashed #ffd400; outline-offset: 1px; position: relative; z-index: 1; }
 /* Mode buttons under the map; each lights up in its own colour when on */
 .mode-btn { background: none; color: var(--text); border: 2px solid var(--line); border-radius: 16px; padding: 6px 14px; font-size: .9rem; }
 .mode-btn.on { color: #000; }

@@ -172,10 +172,11 @@ function listHtml(items, scrollKey) {
   </table></div>`;
 }
 
-// Map modes. Move: first tap picks a product, the second swaps. Count: a tap opens the quick count pop-up.
-// Edit: shows the controls that change the layout; off at every start so nobody changes it by accident.
-let moving = false, counting = false, editing = false, picked = null; // picked: { r, c, l, p }
-const samePart = (a, b) => a.r === b.r && a.c === b.c && a.l === b.l && a.p === b.p;
+// Map modes. Move: tap a product to pick it, tap it again to pick its whole stillage, then tap where it goes.
+// Count: a tap opens the quick count pop-up. Edit: shows the controls that change the layout; off at every start.
+let moving = false, counting = false, editing = false, picked = null; // picked: { r, c, l, p, whole }
+const sameBox = (a, b) => a.r === b.r && a.c === b.c && a.l === b.l;
+const samePart = (a, b) => sameBox(a, b) && a.p === b.p;
 const partAt = ({ r, c, l, p }) => state.rows[r].columns[c].levels[l].parts[p];
 
 function rowHtml(row, r, q) {
@@ -183,7 +184,8 @@ function rowHtml(row, r, q) {
   // What a tap does: open the close-up, or (in Move / Count mode) act on the partition itself.
   const taps = (c, l) => {
     const where = `data-r="${r}" data-c="${c}" data-l="${l}"`;
-    if (moving) return ['', p => `role="button" data-action="pick" ${where} data-p="${p}"${picked && samePart(picked, { r, c, l, p }) ? ' data-picked' : ''}`];
+    if (moving) return [picked?.whole && sameBox(picked, { r, c, l }) ? 'data-picked' : '',
+      p => `role="button" data-action="pick" ${where} data-p="${p}"${picked && !picked.whole && samePart(picked, { r, c, l, p }) ? ' data-picked' : ''}`];
     if (counting) return ['', p => `role="button" data-action="quick-count" ${where} data-p="${p}"`];
     return [`role="button" data-action="open" ${where}`, undefined];
   };
@@ -208,7 +210,10 @@ Object.assign(views, {
   warehouse() {
     const q = query();
     const items = L.allParts(state).filter(x => (L.isSearching(q) ? L.matches(x.part, q) : L.hasProduct(x.part)));
-    const hint = moving ? (picked ? `Now tap where ${esc(L.code(partAt(picked)))} should go (tap it again to cancel)` : 'Tap a product to move')
+    const box = picked && `${esc(state.rows[picked.r].name)} ${L.LEVELS[picked.l]}${L.columnNumbers(state.rows[picked.r])[picked.c]}`;
+    const hint = moving ? (picked?.whole ? `Now tap the stillage to swap ${box} with (tap ${box} again to cancel)`
+      : picked ? `Now tap where ${esc(L.code(partAt(picked)))} should go, or tap it again to move the whole stillage`
+      : 'Tap a product to move')
       : counting ? 'Tap a product to count it' : '';
     const add = editing ? '<button class="add-row" data-action="new-row" aria-label="Add row">+</button>'
       : state.rows.length ? '' : '<p class="muted">Turn on Edit to add a row.</p>';
@@ -284,9 +289,13 @@ Object.assign(actions, {
   },
   pick({ r, c, l, p }) {
     const at = { r: +r, c: +c, l: +l, p: +p };
-    if (picked && samePart(picked, at)) picked = null;                    // tapped again: un-pick
-    else if (picked) { L.swapParts(state, picked, at); picked = null; return commit(); }
-    else if (L.hasProduct(partAt(at))) picked = at;                        // only a product can be picked up
+    if (picked?.whole) {
+      if (sameBox(picked, at)) picked = null;                              // third tap on it: cancel
+      else { L.swapLevels(state, picked, at); picked = null; return commit(); }
+    } else if (picked) {
+      if (samePart(picked, at)) picked = { ...picked, whole: true };       // second tap: the whole stillage
+      else { L.swapParts(state, picked, at); picked = null; return commit(); }
+    } else if (L.hasProduct(partAt(at))) picked = at;                      // only a product can be picked up
     render();
   },
 });
