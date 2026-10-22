@@ -79,6 +79,12 @@ export function swapParts(state, a, b) {
   [parts(a)[a.p], parts(b)[b.p]] = [parts(b)[b.p], parts(a)[a.p]];
 }
 
+// Moving a whole stillage: two levels ({r, c, l}) swap their layout and everything in them.
+export function swapLevels(state, a, b) {
+  const levels = ({ r, c }) => state.rows[r].columns[c].levels;
+  [levels(a)[a.l], levels(b)[b.l]] = [levels(b)[b.l], levels(a)[a.l]];
+}
+
 // Keeps partitions by number: switching between layouts with the same count keeps every product.
 export function setLayout(level, id) {
   const n = LAYOUTS.get(id).length;

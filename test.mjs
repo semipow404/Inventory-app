@@ -203,6 +203,14 @@ assert.equal(L.ymd(new Date(2026, 9, 5)), '2026-10-05');
   assert.deepEqual(m.rows[0].columns[0].levels[0].parts[0], prod);
   L.swapParts(m, a, empty);
   assert.deepEqual(m.rows[0].columns[0].levels[0].parts, [L.emptyPart(), prod]);
+  // Whole stillages swap too: layout and every partition, across rows
+  const midA = m.rows[0].columns[0].levels[0], backC = m.rows[1].columns[0].levels[2];
+  L.swapLevels(m, { r: 0, c: 0, l: 0 }, { r: 1, c: 0, l: 2 });
+  assert.equal(m.rows[0].columns[0].levels[0], backC);
+  assert.equal(m.rows[1].columns[0].levels[2], midA);
+  assert.equal(m.rows[1].columns[0].levels[2].layout, '2II');
+  L.swapLevels(m, { r: 0, c: 0, l: 0 }, { r: 1, c: 0, l: 2 }); // swapping back undoes it
+  assert.equal(m.rows[0].columns[0].levels[0], midA);
 }
 
 // ===== Excel =====
