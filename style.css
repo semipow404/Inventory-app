@@ -111,3 +111,12 @@ dialog input, dialog select { padding: 6px; border-radius: 6px; border: 0; }
 #p-counted { margin: 10px 0 0; font-size: .85rem; color: #ddd; }
 dialog menu { display: flex; flex-direction: row-reverse; gap: 8px; margin: 16px 0 0; padding: 0; }
 .error { min-height: 1em; margin: 6px 0 0; color: #ff8080; }
+
+/* List stillages: default-code box on the map; defaults, Add product and tappable lines in the close-up */
+.part.list-label { font-size: .8rem; }
+.closeup .part.list-label { font-size: 1.1rem; }
+.defaults { display: flex; align-items: center; gap: 6px; width: min(300px, 100%); }
+.defaults select, .defaults input { flex: 1; min-width: 0; padding: 6px; border-radius: 6px; border: 0; }
+.add-item { background: var(--hit); color: #fff; border: 0; border-radius: 6px; padding: 8px 16px; }
+.list tr[role=button] { cursor: pointer; }
+.list tr[role=button] td:first-child { text-decoration: underline dotted; }
