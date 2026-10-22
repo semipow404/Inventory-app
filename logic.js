@@ -85,12 +85,34 @@ export function swapLevels(state, a, b) {
   [levels(a)[a.l], levels(b)[b.l]] = [levels(b)[b.l], levels(a)[a.l]];
 }
 
+// A list stillage isn't split into partitions: `parts` is a list of any number of products, and `defaults`
+// (style / number / colour) pre-fill new ones.
+export const LIST = 'List';
+
 // Keeps partitions by number: switching between layouts with the same count keeps every product.
+// To a list, products keep their order and empty partitions go; from a list, products fill the partitions in order.
 export function setLayout(level, id) {
-  const n = LAYOUTS.get(id).length;
-  while (level.parts.length < n) level.parts.push(emptyPart());
-  level.parts.length = n;
+  if (id === LIST) {
+    level.parts = level.parts.filter(hasProduct);
+    level.defaults ??= { style: '', number: '', color: '' };
+  } else {
+    const n = LAYOUTS.get(id).length;
+    while (level.parts.length < n) level.parts.push(emptyPart());
+    level.parts.length = n;
+    delete level.defaults;
+  }
   level.layout = id;
+}
+
+export const newListItem = level => ({ ...emptyPart(), ...level.defaults });
+
+// How a list stillage reads on the map, e.g. "LSW – WK · 6 products" (a blank part of the default code shows as –).
+export function listLabel(level) {
+  const f = [level.defaults.style, level.defaults.number, level.defaults.color];
+  const first = f.findIndex(Boolean), last = f.findLastIndex(Boolean);
+  const pattern = first < 0 ? 'List' : f.slice(first, last + 1).map(v => v || '–').join(' ');
+  const n = level.parts.length;
+  return `${pattern} · ${n} product${n === 1 ? '' : 's'}`;
 }
 
 // Fills in fields added after the first release so older saves and exports still load.

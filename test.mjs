@@ -62,6 +62,33 @@ L.setLayout(lvl, '4T');
 assert.equal(lvl.parts.length, 4);
 assert.deepEqual(lvl.parts[1], p);
 
+// --- List stillages: any number of products, each with its own count; defaults pre-fill new products
+{
+  const lv = L.newStillage().levels[0];
+  L.setLayout(lv, '4');
+  lv.parts[0] = P('LSW', '012', 'WK', 3);
+  lv.parts[2] = P('LSW', '017', 'WK', 5);
+  L.setLayout(lv, L.LIST);
+  assert.equal(lv.layout, 'List');
+  assert.deepEqual(lv.parts.map(L.code), ['LSW012WK', 'LSW017WK']);   // products kept in order, empty partitions gone
+  assert.deepEqual(lv.defaults, { style: '', number: '', color: '' });
+  lv.defaults = { style: 'LSW', number: '', color: 'WK' };
+  assert.equal(L.listLabel(lv), 'LSW – WK · 2 products');
+  assert.deepEqual(L.newListItem(lv), P('LSW', '', 'WK', null));
+  lv.parts.push(P('LSW', '021', 'WK', 0));
+  assert.equal(L.listLabel(lv), 'LSW – WK · 3 products');
+  const label = (style, number, color, n) => L.listLabel({ layout: 'List', defaults: { style, number, color }, parts: Array(n).fill(P('X', '1', '', 1)) });
+  assert.equal(label('LSW', '', '', 1), 'LSW · 1 product');
+  assert.equal(label('', '012', 'WK', 0), '012 WK · 0 products');
+  assert.equal(label('', '', '', 2), 'List · 2 products');
+  // Back to partitions: products keep their order; any that don't fit would be dropped (the app asks first)
+  assert.ok(L.dropsProducts(lv, 2));
+  L.setLayout(lv, '2II');
+  assert.equal(lv.layout, '2II');
+  assert.equal(lv.defaults, undefined);
+  assert.deepEqual(lv.parts.map(L.code), ['LSW012WK', 'LSW017WK']);
+}
+
 // --- Spaces are named, "Walkway" by default
 const spaced = L.newRow('Spaced');
 L.addColumn(spaced, 'space', 'left');
@@ -324,6 +351,41 @@ const sheets = wb => wb.worksheets.map(s => s.name);
   assert.equal(out.skipped.length, 2);
   assert.match(out.skipped.join('\n'), /abc/);
   assert.match(out.skipped.join('\n'), /b9/);
+}
+
+// --- List stillages in Excel: one map block with the default code and count, one count line per product
+{
+  const s = L.newState();
+  s.styles = ['LSW'];
+  s.rows.push(L.newRow('List Row'));
+  const lv = s.rows[0].columns[0].levels[0];
+  L.setLayout(lv, L.LIST);
+  lv.defaults = { style: 'LSW', number: '', color: 'WK' };
+  lv.parts.push(P('LSW', '012', 'WK', 3), P('LSW', '017', 'WK', null), P('LSW', '021', 'WK', 0));
+  const wb = await opened(await exportWorkbook(ExcelJS, s));
+  const map = wb.getWorksheet('Stillage map'), sc = wb.getWorksheet('Stock count');
+  assert.equal(map.getCell(3, col(0)).text, 'LSW – WK · 3 products');
+  assert.equal(map.getCell(14, col(0) + 11).text, 'LSW – WK · 3 products');   // one 12×12 block for the whole list
+  assert.deepEqual([3, 4, 5].map(r => line(sc, r)), [
+    ['List Row', 'a1', '1', 'LSW012WK', '3'], ['List Row', 'a1', '2', 'LSW017WK', ''], ['List Row', 'a1', '3', 'LSW021WK', '0']]);
+  sc.getCell(4, 5).value = 8;                                                   // counted in Excel
+  const expected = structuredClone(s);
+  expected.rows[0].columns[0].levels[0].parts[1].stock = 8;
+  assert.deepEqual(await importWorkbook(ExcelJS, await wb.xlsx.writeBuffer()), { state: expected, skipped: [] });
+  // Bad list data in the hidden sheet is rejected like any other
+  const tamperList = async mutate => {
+    const w = await opened(await exportWorkbook(ExcelJS, s));
+    const meta = w.getWorksheet('_layout');
+    const data = JSON.parse(meta.getCell(2, 1).value);
+    mutate(data.rows[0].columns[0].levels[0]);
+    meta.getCell(2, 1).value = JSON.stringify(data);
+    return (await importWorkbook(ExcelJS, await w.xlsx.writeBuffer())).error ?? 'accepted';
+  };
+  assert.equal(await tamperList(() => {}), 'accepted');
+  assert.equal(await tamperList(l => { l.parts = []; }), 'accepted');                   // an empty list is fine
+  assert.match(await tamperList(l => { l.defaults.number = 5; }), /damaged/);
+  assert.match(await tamperList(l => { delete l.defaults; }), /damaged/);
+  assert.match(await tamperList(l => { l.parts[0].stock = '<b>1</b>'; }), /damaged/);
 }
 
 // --- A layout too big for one Excel cell survives (Review Focus 1)
