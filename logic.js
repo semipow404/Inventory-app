@@ -19,7 +19,23 @@ export const LAYOUTS = new Map([
   ['16', grid(4, 4)],
 ]);
 
-export const newState = () => ({ styles: [], rows: [] });
+export const newState = () => ({ styles: [], rows: [], yard: emptyYard() });
+
+// The yard: bulk stillages waiting to come into the warehouse. Two fixed sections, each a list of rows of cards;
+// a card is a product code and how many stillages of it there are, in quarters.
+export const YARD_SECTIONS = [['white', 'White Bulk'], ['other', 'Other Bulk']];
+const emptyYard = () => ({ white: [[]], other: [[]] });
+
+export function makeYardCard(fields) {
+  const card = { ...cleanCode(fields), count: 0 };
+  return code(card) ? { card } : { error: 'Enter a code.' };
+}
+
+// +1 / −1 / +½ / −½ / +¼ / −¼, kept to exact quarters and never below 0.
+export const stepCount = (count, delta) => Math.max(0, Math.round((count + delta) * 4) / 4);
+
+export const yardLines = state => YARD_SECTIONS.flatMap(([key, section]) => state.yard[key].flatMap((row, r) =>
+  row.map(card => ({ section, row: r + 1, product: code(card), stillages: card.count }))));
 // full: what "full" means for this partition (for the usage colours). counts: the last COUNTS_KEPT counts, newest last.
 export const emptyPart = () => ({ style: '', number: '', color: '', stock: null, full: null, counts: [] });
 export const COUNTS_KEPT = 30;
@@ -107,6 +123,7 @@ export function setLayout(level, id) {
 const FIRST_LAYOUTS = ['1', '2II', '3II', '4']; // the first release had only these, picked by partition count
 export function migrate(state) {
   const list = v => (Array.isArray(v) ? v : []);
+  if (state && typeof state === 'object' && state.yard === undefined) state.yard = emptyYard();
   for (const row of list(state?.rows)) for (const col of list(row?.columns)) {
     if (col?.type === 'space' && col.name === undefined) col.name = 'Walkway';
     if (col?.type === 'stillage') for (const lvl of list(col.levels)) {

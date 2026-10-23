@@ -1,5 +1,5 @@
 // Excel export/import. ExcelJS is passed in: window.ExcelJS in the browser, the npm package in tests.
-import { LEVELS, LAYOUTS, COUNTS_KEPT, columnNumbers, allParts, hasProduct, isList, productCount, code, ymd, migrate } from './logic.js';
+import { LEVELS, LAYOUTS, COUNTS_KEPT, YARD_SECTIONS, columnNumbers, allParts, hasProduct, isList, productCount, code, ymd, migrate, yardLines } from './logic.js';
 
 export const MARKER = 'INVENTORY-APP-V1';
 const HEADER = ['Row', 'Box', 'Partition', 'Code', 'Stock'];
@@ -57,10 +57,19 @@ function writeCount(ws, state, date) {
   }
 }
 
-export async function exportWorkbook(ExcelJS, state, { date = new Date(), chunk = 30000, map = true, count = true } = {}) {
+// The yard, for reading in Excel (yard counts are changed in the app): title, header, one line per product card.
+function writeYard(ws, state, date) {
+  ws.columns = [14, 6, 20, 10].map(width => ({ width }));
+  Object.assign(ws.getCell(1, 1), { value: `Yard — ${ymd(date)}`, font: { bold: true, size: 14 } });
+  ['Section', 'Row', 'Product', 'Stillages'].forEach((h, i) => Object.assign(ws.getCell(2, i + 1), { value: h, font: { bold: true }, border: { bottom: THIN } }));
+  yardLines(state).forEach((x, n) => [x.section, x.row, x.product, x.stillages].forEach((v, i) => { ws.getCell(3 + n, i + 1).value = v; }));
+}
+
+export async function exportWorkbook(ExcelJS, state, { date = new Date(), chunk = 30000, map = true, count = true, yard = true } = {}) {
   const wb = new ExcelJS.Workbook();
   if (map) drawMap(wb.addWorksheet('Stillage map'), state);
   if (count) writeCount(wb.addWorksheet('Stock count'), state, date);
+  if (yard) writeYard(wb.addWorksheet('Yard'), state, date);
 
   // The full layout always travels in the hidden sheet, so a map-only or count-only file still imports.
   const meta = wb.addWorksheet('_layout', { state: 'hidden' });
@@ -86,7 +95,9 @@ const isLevel = lvl => LAYOUTS.has(lvl?.layout) && Array.isArray(lvl.parts) &&
   lvl.parts.length === LAYOUTS.get(lvl.layout).length && lvl.parts.every(isPart);
 const isColumn = col => (col?.type === 'space' && isText(col.name)) ||
   (col?.type === 'stillage' && Array.isArray(col.levels) && col.levels.length === LEVELS.length && col.levels.every(isLevel));
-const isState = s => Array.isArray(s?.styles) && s.styles.every(isText) &&
+const isCard = c => isText(c?.style) && isText(c.number) && isText(c.color) && typeof c.count === 'number' && c.count >= 0 && Number.isInteger(c.count * 4);
+const isYard = y => YARD_SECTIONS.every(([key]) => Array.isArray(y?.[key]) && y[key].every(row => Array.isArray(row) && row.every(isCard)));
+const isState = s => Array.isArray(s?.styles) && s.styles.every(isText) && isYard(s.yard) &&
   Array.isArray(s.rows) && s.rows.every(row => isText(row?.name) && Array.isArray(row.columns) && row.columns.every(isColumn));
 
 // The count table's header row and each field's column, found by text so rows or columns added in Excel don't break it.
