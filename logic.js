@@ -28,7 +28,11 @@ export const newStillage = () => ({ type: 'stillage', levels: LEVELS.map(() => (
 export const newRow = name => ({ name: name.trim(), columns: [newStillage()] });
 
 export const code = p => p.style + p.number + p.color;
-export const hasProduct = p => code(p) !== '';
+// A list partition holds any number of products in `list` (each shaped like a partition, without a list of its own);
+// its own style / number / colour are the default the pop-up starts from, and it has no stock, Full or counts.
+export const isList = p => Array.isArray(p.list);
+export const hasProduct = p => (isList(p) ? p.list.length > 0 : code(p) !== '');
+export const productCount = n => `${n} product${n === 1 ? '' : 's'}`;
 
 // 1-based stillage number for each column of a row; null for walkways.
 export function columnNumbers(row) {
@@ -36,15 +40,19 @@ export function columnNumbers(row) {
   return row.columns.map(c => (c.type === 'stillage' ? ++n : null));
 }
 
-// Every partition in walking order: row, column, level (a→c), partition.
+// Every partition in walking order: row, column, level (a→c), partition. A list partition gives one entry per
+// product instead (with its index `i`), so tables, search and imports see each product.
 export function allParts(state) {
   const out = [];
   state.rows.forEach((row, r) => {
     const nums = columnNumbers(row);
     row.columns.forEach((col, c) => {
       if (col.type !== 'stillage') return;
-      col.levels.forEach((lvl, l) => lvl.parts.forEach((part, p) =>
-        out.push({ r, c, l, p, row: row.name, box: LEVELS[l] + nums[c], partition: p + 1, part })));
+      col.levels.forEach((lvl, l) => lvl.parts.forEach((part, p) => {
+        const at = { r, c, l, p, row: row.name, box: LEVELS[l] + nums[c], partition: p + 1 };
+        if (isList(part)) part.list.forEach((item, i) => out.push({ ...at, i, part: item }));
+        else out.push({ ...at, part });
+      }));
     });
   });
   return out;
@@ -54,6 +62,7 @@ export const isSearching = q => Boolean(q.style || q.number || q.color);
 
 // Each filled search box must equal that part of the code, ignoring case; empty boxes are ignored.
 export function matches(part, q) {
+  if (isList(part)) return part.list.some(x => matches(x, q));
   const eq = (value, wanted) => !wanted || value.toUpperCase() === wanted.toUpperCase();
   return isSearching(q) && hasProduct(part) && eq(part.style, q.style) && eq(part.number, q.number) && eq(part.color, q.color);
 }
@@ -85,34 +94,12 @@ export function swapLevels(state, a, b) {
   [levels(a)[a.l], levels(b)[b.l]] = [levels(b)[b.l], levels(a)[a.l]];
 }
 
-// A list stillage isn't split into partitions: `parts` is a list of any number of products, and `defaults`
-// (style / number / colour) pre-fill new ones.
-export const LIST = 'List';
-
 // Keeps partitions by number: switching between layouts with the same count keeps every product.
-// To a list, products keep their order and empty partitions go; from a list, products fill the partitions in order.
 export function setLayout(level, id) {
-  if (id === LIST) {
-    level.parts = level.parts.filter(hasProduct);
-    level.defaults ??= { style: '', number: '', color: '' };
-  } else {
-    const n = LAYOUTS.get(id).length;
-    while (level.parts.length < n) level.parts.push(emptyPart());
-    level.parts.length = n;
-    delete level.defaults;
-  }
+  const n = LAYOUTS.get(id).length;
+  while (level.parts.length < n) level.parts.push(emptyPart());
+  level.parts.length = n;
   level.layout = id;
-}
-
-export const newListItem = level => ({ ...emptyPart(), ...level.defaults });
-
-// How a list stillage reads on the map, e.g. "LSW – WK · 6 products" (a blank part of the default code shows as –).
-export function listLabel(level) {
-  const f = [level.defaults.style, level.defaults.number, level.defaults.color];
-  const first = f.findIndex(Boolean), last = f.findLastIndex(Boolean);
-  const pattern = first < 0 ? 'List' : f.slice(first, last + 1).map(v => v || '–').join(' ');
-  const n = level.parts.length;
-  return `${pattern} · ${n} product${n === 1 ? '' : 's'}`;
 }
 
 // Fills in fields added after the first release so older saves and exports still load.
@@ -123,10 +110,14 @@ export function migrate(state) {
   for (const row of list(state?.rows)) for (const col of list(row?.columns)) {
     if (col?.type === 'space' && col.name === undefined) col.name = 'Walkway';
     if (col?.type === 'stillage') for (const lvl of list(col.levels)) {
+      if (lvl?.layout === 'List' && Array.isArray(lvl.parts)) { // the short-lived stillage-wide list → one list partition
+        Object.assign(lvl, { layout: '1', parts: [{ ...emptyPart(), ...lvl.defaults, list: lvl.parts }] });
+        delete lvl.defaults;
+      }
       if (lvl && lvl.layout === undefined && Array.isArray(lvl.parts)) lvl.layout = FIRST_LAYOUTS[lvl.parts.length - 1];
-      for (const part of list(lvl?.parts)) {
-        if (part && part.full === undefined) part.full = null;
-        if (part && part.counts === undefined) part.counts = [];
+      for (const part of list(lvl?.parts)) for (const p of [part, ...list(part?.list)]) {
+        if (p && p.full === undefined) p.full = null;
+        if (p && p.counts === undefined) p.counts = [];
       }
     }
   }
@@ -135,14 +126,33 @@ export function migrate(state) {
 
 // Turns the product pop-up's raw field values into a partition, or an error message. Any part of the code may be blank.
 // Saving a stock number is a count, even if the number didn't change: it's added to `prev`'s counts, stamped `now`.
+const cleanCode = ({ style, number, color }) => ({ style, number: number.trim().toUpperCase(), color: color.trim().toUpperCase() });
+
 export function makePart({ style, number, color, stock, full }, prev = emptyPart(), now = new Date()) {
-  const p = { style, number: number.trim().toUpperCase(), color: color.trim().toUpperCase(), stock: stock.trim(), full: full.trim() };
+  const p = { ...cleanCode({ style, number, color }), stock: stock.trim(), full: full.trim() };
   if (!p.style && !p.number && !p.color) return { part: emptyPart() };
   if (p.stock !== '' && !/^\d+$/.test(p.stock)) return { error: 'Stock must be a whole number, 0 or more.' };
   if (p.full !== '' && !/^[1-9]\d*$/.test(p.full)) return { error: 'Full must be a whole number, 1 or more.' };
   const s = p.stock === '' ? null : Number(p.stock);
   const counts = s === null ? prev.counts : addCount(prev.counts, s, now);
   return { part: { ...p, stock: s, full: p.full === '' ? null : Number(p.full), counts } };
+}
+
+// List partitions in the pop-up: the name fields add a product to the list being edited.
+export function addToList(items, fields) {
+  const item = { ...emptyPart(), ...cleanCode(fields) };
+  if (!hasProduct(item)) return { error: 'Enter a code to add.' };
+  if (items.some(x => code(x) === code(item))) return { error: `${code(item)} is already in the list.` };
+  return { items: [...items, item] };
+}
+
+// Saving a list partition: the name fields become its default. typed[i] is items[i]'s stock box: a number counts
+// that product (stamped `now`), a blank box leaves it as it was.
+export function makeList(fields, items, typed, now = new Date()) {
+  const box = i => (typed[i] ?? '').trim();
+  if (items.some((_, i) => box(i) !== '' && !/^\d+$/.test(box(i)))) return { error: 'Stock must be a whole number, 0 or more.' };
+  const list = items.map((x, i) => (box(i) === '' ? x : { ...x, stock: Number(box(i)), counts: addCount(x.counts, Number(box(i)), now) }));
+  return { part: { ...emptyPart(), ...cleanCode(fields), list } };
 }
 
 // Count mode: a new stock number for an existing product; everything else stays as it is.
@@ -183,11 +193,10 @@ export const styleChoices = (styles, current) =>
   ['', ...styles, ...(current && !styles.includes(current) ? [current] : [])];
 
 export function summary(state) {
-  const parts = allParts(state);
   return {
     rows: state.rows.length,
-    stillages: parts.filter(x => x.p === 0).length,
-    products: parts.filter(x => hasProduct(x.part)).length,
+    stillages: state.rows.reduce((n, row) => n + row.columns.filter(c => c.type === 'stillage').length * LEVELS.length, 0),
+    products: allParts(state).filter(x => hasProduct(x.part)).length,
   };
 }
 

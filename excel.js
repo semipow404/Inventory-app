@@ -1,5 +1,5 @@
 // Excel export/import. ExcelJS is passed in: window.ExcelJS in the browser, the npm package in tests.
-import { LEVELS, LAYOUTS, LIST, COUNTS_KEPT, columnNumbers, allParts, hasProduct, code, ymd, migrate, listLabel } from './logic.js';
+import { LEVELS, LAYOUTS, COUNTS_KEPT, columnNumbers, allParts, hasProduct, isList, productCount, code, ymd, migrate } from './logic.js';
 
 export const MARKER = 'INVENTORY-APP-V1';
 const HEADER = ['Row', 'Box', 'Partition', 'Code', 'Stock'];
@@ -32,16 +32,12 @@ function drawMap(ws, state) {
     LEVELS.forEach((letter, l) => block(ws, top + l * G, 1, 1, G, letter, { alignment: CENTER, font: { bold: true } }));
     row.columns.forEach((column, c) => {
       if (column.type === 'space') return block(ws, top, col(c), G, LEVELS.length * G, column.name, { alignment: CENTER, fill: GREY });
-      column.levels.forEach((lvl, l) => {
-        const at = top + l * G;
-        if (lvl.layout === LIST) { // one box for the whole list: its default code and how many products it holds
-          return block(ws, at, col(c), G, G, listLabel(lvl), { alignment: CENTER, border: { top: THICK, bottom: THICK, left: THICK, right: THICK } });
-        }
-        LAYOUTS.get(lvl.layout).forEach(([x, y, w, h], p) => {
-          const border = { top: y === 0 ? THICK : THIN, bottom: y + h === G ? THICK : THIN, left: x === 0 ? THICK : THIN, right: x + w === G ? THICK : THIN };
-          block(ws, at + y, col(c) + x, w, h, code(lvl.parts[p]) || 'NA', { alignment: CENTER, border });
-        });
-      });
+      column.levels.forEach((lvl, l) => LAYOUTS.get(lvl.layout).forEach(([x, y, w, h], p) => {
+        const part = lvl.parts[p];
+        const text = isList(part) ? `LIST · ${productCount(part.list.length)}` : code(part) || 'NA';
+        const border = { top: y === 0 ? THICK : THIN, bottom: y + h === G ? THICK : THIN, left: x === 0 ? THICK : THIN, right: x + w === G ? THICK : THIN };
+        block(ws, top + l * G + y, col(c) + x, w, h, text, { alignment: CENTER, border });
+      }));
     });
     r = top + LEVELS.length * G + 1; // the three levels, then 1 blank row
   }
@@ -81,13 +77,13 @@ const key = (row, box, partition) => `${row.trim().toUpperCase()}|${box.trim().t
 const isText = v => typeof v === 'string';
 const isWhole = (v, min) => Number.isInteger(v) && v >= min;
 const isCount = c => isWhole(c?.stock, 0) && isText(c.at) && !Number.isNaN(Date.parse(c.at));
-const isPart = p => isText(p?.style) && isText(p.number) && isText(p.color) &&
+const isProduct = p => isText(p?.style) && isText(p.number) && isText(p.color) &&
   (p.stock === null || isWhole(p.stock, 0)) && (p.full === null || isWhole(p.full, 1)) &&
-  Array.isArray(p.counts) && p.counts.length <= COUNTS_KEPT && p.counts.every(isCount);
-const isList = lvl => lvl.layout === LIST && Array.isArray(lvl.parts) && lvl.parts.every(isPart) &&
-  isText(lvl.defaults?.style) && isText(lvl.defaults.number) && isText(lvl.defaults.color);
-const isLevel = lvl => (LAYOUTS.has(lvl?.layout) && Array.isArray(lvl.parts) &&
-  lvl.parts.length === LAYOUTS.get(lvl.layout).length && lvl.parts.every(isPart)) || (lvl?.layout === LIST && isList(lvl));
+  Array.isArray(p.counts) && p.counts.length <= COUNTS_KEPT && p.counts.every(isCount) && p.list === undefined;
+// A partition is a product, or a list of products (no lists inside lists).
+const isPart = p => isProduct({ ...p, list: undefined }) && (p.list === undefined || (Array.isArray(p.list) && p.list.every(isProduct)));
+const isLevel = lvl => LAYOUTS.has(lvl?.layout) && Array.isArray(lvl.parts) &&
+  lvl.parts.length === LAYOUTS.get(lvl.layout).length && lvl.parts.every(isPart);
 const isColumn = col => (col?.type === 'space' && isText(col.name)) ||
   (col?.type === 'stillage' && Array.isArray(col.levels) && col.levels.length === LEVELS.length && col.levels.every(isLevel));
 const isState = s => Array.isArray(s?.styles) && s.styles.every(isText) &&
@@ -118,14 +114,16 @@ export async function importWorkbook(ExcelJS, buffer) {
   try { state = migrate(JSON.parse(json)); } catch { return { error: 'The layout data in this file is damaged.' }; }
   if (!isState(state)) return { error: 'The layout data in this file is damaged.' };
 
-  const index = new Map(allParts(state).map(x => [key(x.row, x.box, x.partition), x.part]));
+  // Products in a list partition share its Row/Box/Partition, so they're told apart by code.
+  const index = new Map(allParts(state).map(x =>
+    [key(x.row, x.box, x.partition) + (x.i === undefined ? '' : `|${code(x.part)}`), x.part]));
   const table = ws && findTable(ws);
   const skipped = [];
   if (table) for (let n = table.header + 1; n <= ws.rowCount; n++) {
-    const [row, box, partition, , stock] = table.cols.map(c => ws.getCell(n, c).text.trim());
+    const [row, box, partition, lineCode, stock] = table.cols.map(c => ws.getCell(n, c).text.trim());
     if (!row && !box) continue;
-    const part = index.get(key(row, box, partition));
-    if (!part) skipped.push(`Line ${n}: ${row} ${box} partition ${partition} doesn't exist`);
+    const part = index.get(`${key(row, box, partition)}|${lineCode.toUpperCase()}`) ?? index.get(key(row, box, partition));
+    if (!part) skipped.push(`Line ${n}: ${row} ${box} partition ${partition} ${lineCode} doesn't exist`);
     else if (stock === '') part.stock = null;
     else if (/^\d+$/.test(stock)) part.stock = Number(stock);
     else skipped.push(`Line ${n}: stock "${stock}" isn't a whole number`);

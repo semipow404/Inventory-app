@@ -62,31 +62,55 @@ L.setLayout(lvl, '4T');
 assert.equal(lvl.parts.length, 4);
 assert.deepEqual(lvl.parts[1], p);
 
-// --- List stillages: any number of products, each with its own count; defaults pre-fill new products
+// --- List partitions: a partition can hold any number of products, each with its own count
 {
-  const lv = L.newStillage().levels[0];
-  L.setLayout(lv, '4');
-  lv.parts[0] = P('LSW', '012', 'WK', 3);
-  lv.parts[2] = P('LSW', '017', 'WK', 5);
-  L.setLayout(lv, L.LIST);
-  assert.equal(lv.layout, 'List');
-  assert.deepEqual(lv.parts.map(L.code), ['LSW012WK', 'LSW017WK']);   // products kept in order, empty partitions gone
-  assert.deepEqual(lv.defaults, { style: '', number: '', color: '' });
-  lv.defaults = { style: 'LSW', number: '', color: 'WK' };
-  assert.equal(L.listLabel(lv), 'LSW – WK · 2 products');
-  assert.deepEqual(L.newListItem(lv), P('LSW', '', 'WK', null));
-  lv.parts.push(P('LSW', '021', 'WK', 0));
-  assert.equal(L.listLabel(lv), 'LSW – WK · 3 products');
-  const label = (style, number, color, n) => L.listLabel({ layout: 'List', defaults: { style, number, color }, parts: Array(n).fill(P('X', '1', '', 1)) });
-  assert.equal(label('LSW', '', '', 1), 'LSW · 1 product');
-  assert.equal(label('', '012', 'WK', 0), '012 WK · 0 products');
-  assert.equal(label('', '', '', 2), 'List · 2 products');
-  // Back to partitions: products keep their order; any that don't fit would be dropped (the app asks first)
-  assert.ok(L.dropsProducts(lv, 2));
+  const T1 = new Date('2026-10-23T09:00:00Z'), T2 = new Date('2026-10-23T15:00:00Z');
+  let items = [];
+  ({ items } = L.addToList(items, { style: 'LSW', number: ' 017 ', color: 'wc' }));
+  ({ items } = L.addToList(items, { style: 'LSW', number: '022', color: 'WCBF' }));
+  assert.deepEqual(items.map(L.code), ['LSW017WC', 'LSW022WCBF']);
+  assert.match(L.addToList(items, { style: 'LSW', number: '022', color: 'wcbf' }).error, /already in the list/);
+  assert.match(L.addToList(items, { style: '', number: ' ', color: '' }).error, /code/);
+  // Saving: the name fields become the partition's default; a typed stock counts that product, a blank box leaves it alone
+  const { part } = L.makeList({ style: 'LSW', number: '022', color: 'wcbf' }, items, ['7', ''], T1);
+  assert.ok(L.isList(part));
+  assert.deepEqual([part.style, part.number, part.color, part.stock, part.full], ['LSW', '022', 'WCBF', null, null]);
+  assert.deepEqual(part.list[0], P('LSW', '017', 'WC', 7, { counts: [{ at: T1.toISOString(), stock: 7 }] }));
+  assert.deepEqual(part.list[1], P('LSW', '022', 'WCBF', null));
+  const again = L.makeList({ style: 'LSW', number: '022', color: 'WCBF' }, part.list, ['', '3'], T2).part;
+  assert.deepEqual([again.list[0].stock, again.list[0].counts.length], [7, 1]);
+  assert.equal(L.lastCounted(again.list[1]), T2.toISOString());
+  assert.match(L.makeList({ style: '', number: '', color: '' }, items, ['x', '']).error, /whole number/);
+  // On the map: "LIST" and a product count; no usage colour, graph or own count; search looks inside
+  assert.equal(L.productCount(2), '2 products');
+  assert.equal(L.productCount(1), '1 product');
+  assert.ok(L.hasProduct(again));
+  assert.ok(!L.hasProduct({ ...again, list: [] }));
+  assert.ok(L.matches(again, { style: '', number: '017', color: '' }));
+  assert.ok(!L.matches(again, { style: '', number: '999', color: '' }));
+  assert.equal(L.usage(again), null);
+  assert.deepEqual(L.stockLine(again), []);
+  assert.equal(L.lastCounted(again), null);
+  // One count line per product, all carrying the partition's number; a list moves as a whole
+  const st = L.newState();
+  st.rows.push(L.newRow('R'));
+  const lv = st.rows[0].columns[0].levels[0];
   L.setLayout(lv, '2II');
-  assert.equal(lv.layout, '2II');
-  assert.equal(lv.defaults, undefined);
-  assert.deepEqual(lv.parts.map(L.code), ['LSW012WK', 'LSW017WK']);
+  lv.parts[0] = P('LAN', '042', 'W', 5);
+  lv.parts[1] = again;
+  const lines = () => L.allParts(st).filter(x => L.hasProduct(x.part)).map(x => `${x.box}/${x.partition}/${L.code(x.part)}`);
+  assert.deepEqual(lines(), ['a1/1/LAN042W', 'a1/2/LSW017WC', 'a1/2/LSW022WCBF']);
+  assert.deepEqual(L.summary(st), { rows: 1, stillages: 3, products: 3 });
+  L.swapParts(st, { r: 0, c: 0, l: 0, p: 0 }, { r: 0, c: 0, l: 0, p: 1 });
+  assert.deepEqual(lines(), ['a1/1/LSW017WC', 'a1/1/LSW022WCBF', 'a1/2/LAN042W']);
+  // Yesterday's stillage-wide lists become one list partition, keeping their default and products
+  const old = { styles: [], rows: [{ name: 'R', columns: [{ type: 'stillage', levels: [
+    { layout: 'List', defaults: { style: 'LSW', number: '', color: 'WK' }, parts: [P('LSW', '012', 'WK', 3)] },
+    { layout: '1', parts: [L.emptyPart()] }, { layout: '1', parts: [L.emptyPart()] }] }] }] };
+  const conv = L.migrate(old).rows[0].columns[0].levels[0];
+  assert.equal(conv.layout, '1');
+  assert.equal(conv.defaults, undefined);
+  assert.deepEqual(conv.parts, [{ ...L.emptyPart(), style: 'LSW', color: 'WK', list: [P('LSW', '012', 'WK', 3)] }]);
 }
 
 // --- Spaces are named, "Walkway" by default
@@ -353,39 +377,42 @@ const sheets = wb => wb.worksheets.map(s => s.name);
   assert.match(out.skipped.join('\n'), /b9/);
 }
 
-// --- List stillages in Excel: one map block with the default code and count, one count line per product
+// --- List partitions in Excel: "LIST · n products" on the map, a line per product, matched by code on import
 {
   const s = L.newState();
   s.styles = ['LSW'];
   s.rows.push(L.newRow('List Row'));
   const lv = s.rows[0].columns[0].levels[0];
-  L.setLayout(lv, L.LIST);
-  lv.defaults = { style: 'LSW', number: '', color: 'WK' };
-  lv.parts.push(P('LSW', '012', 'WK', 3), P('LSW', '017', 'WK', null), P('LSW', '021', 'WK', 0));
+  L.setLayout(lv, '2II');
+  lv.parts[0] = P('LAN', '042', 'W', 5);
+  lv.parts[1] = { ...P('LSW', '', 'WC', null), list: [P('LSW', '017', 'WC', 3), P('LSW', '022', 'WCBF', null)] };
   const wb = await opened(await exportWorkbook(ExcelJS, s));
   const map = wb.getWorksheet('Stillage map'), sc = wb.getWorksheet('Stock count');
-  assert.equal(map.getCell(3, col(0)).text, 'LSW – WK · 3 products');
-  assert.equal(map.getCell(14, col(0) + 11).text, 'LSW – WK · 3 products');   // one 12×12 block for the whole list
+  assert.equal(map.getCell(3, col(0) + 6).text, 'LIST · 2 products');
   assert.deepEqual([3, 4, 5].map(r => line(sc, r)), [
-    ['List Row', 'a1', '1', 'LSW012WK', '3'], ['List Row', 'a1', '2', 'LSW017WK', ''], ['List Row', 'a1', '3', 'LSW021WK', '0']]);
-  sc.getCell(4, 5).value = 8;                                                   // counted in Excel
+    ['List Row', 'a1', '1', 'LAN042W', '5'], ['List Row', 'a1', '2', 'LSW017WC', '3'], ['List Row', 'a1', '2', 'LSW022WCBF', '']]);
+  sc.getCell(5, 5).value = 8;                      // LSW022WCBF counted in Excel
+  sc.getCell(4, 4).value = 'LSW999WC';             // a changed code no longer matches
+  const out = await importWorkbook(ExcelJS, await wb.xlsx.writeBuffer());
   const expected = structuredClone(s);
-  expected.rows[0].columns[0].levels[0].parts[1].stock = 8;
-  assert.deepEqual(await importWorkbook(ExcelJS, await wb.xlsx.writeBuffer()), { state: expected, skipped: [] });
+  expected.rows[0].columns[0].levels[0].parts[1].list[1].stock = 8;
+  assert.deepEqual(out.state, expected);
+  assert.equal(out.skipped.length, 1);
+  assert.match(out.skipped[0], /LSW999WC/);
   // Bad list data in the hidden sheet is rejected like any other
   const tamperList = async mutate => {
     const w = await opened(await exportWorkbook(ExcelJS, s));
     const meta = w.getWorksheet('_layout');
     const data = JSON.parse(meta.getCell(2, 1).value);
-    mutate(data.rows[0].columns[0].levels[0]);
+    mutate(data.rows[0].columns[0].levels[0].parts[1]);
     meta.getCell(2, 1).value = JSON.stringify(data);
     return (await importWorkbook(ExcelJS, await w.xlsx.writeBuffer())).error ?? 'accepted';
   };
   assert.equal(await tamperList(() => {}), 'accepted');
-  assert.equal(await tamperList(l => { l.parts = []; }), 'accepted');                   // an empty list is fine
-  assert.match(await tamperList(l => { l.defaults.number = 5; }), /damaged/);
-  assert.match(await tamperList(l => { delete l.defaults; }), /damaged/);
-  assert.match(await tamperList(l => { l.parts[0].stock = '<b>1</b>'; }), /damaged/);
+  assert.equal(await tamperList(p => { p.list = []; }), 'accepted');               // an empty list is fine
+  assert.match(await tamperList(p => { p.list = 'x'; }), /damaged/);
+  assert.match(await tamperList(p => { p.list[0].stock = '<b>1</b>'; }), /damaged/);
+  assert.match(await tamperList(p => { p.list[0].list = []; }), /damaged/);        // no lists inside lists
 }
 
 // --- A layout too big for one Excel cell survives (Review Focus 1)
