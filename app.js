@@ -70,7 +70,7 @@ Object.assign(views, {
   home: () => ({ title: 'Home', html: `
     <nav class="home">
       <a class="big warehouse" href="#warehouse">Warehouse</a>
-      <button class="big yard" disabled>Yard</button>
+      <a class="big yard" href="#yard">Yard</a>
       <button class="big store" disabled>Store</button>
       <div class="pair">
         <button class="io" data-action="import">Import</button>
@@ -408,6 +408,70 @@ document.addEventListener('change', e => {
   commit();
 });
 
+// ---- Yard: bulk stillages waiting to come into the warehouse. Each section is rows of product cards, and each
+// card's count changes in quarter stillages with its six buttons.
+const yardDialog = $('#yard-dialog');
+const STEPS = [[1, '+1'], [-1, '−1'], [0.5, '+½'], [-0.5, '−½'], [0.25, '+¼'], [-0.25, '−¼']];
+
+function yardCardHtml(s, r, c, card) {
+  const at = `data-s="${s}" data-r="${r}" data-c="${c}"`;
+  return `<div class="yard-card">
+    <button class="yard-code" data-action="yard-edit" ${at}>${esc(L.code(card))} <span>(${card.count})</span></button>
+    <div class="yard-steps">${STEPS.map(([d, label]) =>
+      `<button class="${d > 0 ? 'up' : 'down'}" data-action="yard-step" ${at} data-d="${d}" aria-label="${label} ${esc(L.code(card))}">${label}</button>`).join('')}</div>
+  </div>`;
+}
+
+Object.assign(views, {
+  yard: () => ({ title: 'Yard', html: `<div class="yard-page" data-scroll="yard">${L.YARD_SECTIONS.map(([s, name]) => `
+    <section class="yard-section">
+      <h2>${name}</h2>
+      ${state.yard[s].map((row, r) => `<div class="yard-row" data-scroll="yard-${s}-${r}">
+        ${row.map((card, c) => yardCardHtml(s, r, c, card)).join('')}
+        <button class="yard-add" data-action="yard-add-card" data-s="${s}" data-r="${r}" aria-label="Add a product to this row">+</button>
+      </div>`).join('')}
+      <button class="yard-add" data-action="yard-add-row" data-s="${s}" aria-label="Add a row to ${name}">+</button>
+    </section>`).join('')}</div>` }),
+});
+
+// The yard card pop-up: resolves with the new card's code fields, 'delete', or null when cancelled.
+async function askYardCard(card, deletable) {
+  $('#y-style').innerHTML = styleOptions(card.style);
+  $('#y-number').value = card.number;
+  $('#y-color').value = card.color;
+  yardDialog.querySelector('[value=delete]').hidden = !deletable;
+  let made;
+  const choice = await ask(yardDialog, () =>
+    (made = L.makeYardCard({ style: $('#y-style').value, number: $('#y-number').value, color: $('#y-color').value })).error);
+  return choice === 'save' ? made.card : choice === 'delete' ? 'delete' : null;
+}
+
+Object.assign(actions, {
+  'yard-step'({ s, r, c, d }) {
+    const card = state.yard[s][r][c];
+    card.count = L.stepCount(card.count, Number(d));
+    commit();
+  },
+  async 'yard-add-card'({ s, r }) {
+    const card = await askYardCard({ style: '', number: '', color: '' }, false);
+    if (!card || card === 'delete') return;
+    state.yard[s][r].push(card);
+    commit();
+  },
+  'yard-add-row'({ s }) { state.yard[s].push([]); commit(); },
+  async 'yard-edit'({ s, r, c }) {
+    const row = state.yard[s][r], card = row[c];
+    const result = await askYardCard(card, true);
+    if (result === 'delete') {
+      if (!confirm(`Delete ${L.code(card)} from the yard?`)) return;
+      row.splice(Number(c), 1);
+      if (!row.length && state.yard[s].length > 1) state.yard[s].splice(Number(r), 1); // a row left empty goes too
+    } else if (result) Object.assign(card, { style: result.style, number: result.number, color: result.color });
+    else return;
+    commit();
+  },
+});
+
 // ---- Excel import / export
 const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
@@ -415,8 +479,8 @@ const exportDialog = $('#export-dialog');
 
 Object.assign(actions, {
   async export() {
-    const parts = () => ({ map: $('#x-map').checked, count: $('#x-count').checked });
-    if (await ask(exportDialog, () => (parts().map || parts().count ? null : 'Tick at least one.')) !== 'save') return;
+    const parts = () => ({ map: $('#x-map').checked, count: $('#x-count').checked, yard: $('#x-yard').checked });
+    if (await ask(exportDialog, () => (Object.values(parts()).some(Boolean) ? null : 'Tick at least one.')) !== 'save') return;
     const name = `warehouse-${L.ymd()}.xlsx`;
     const file = new File([await exportWorkbook(window.ExcelJS, state, parts())], name, { type: XLSX_TYPE });
     if (navigator.canShare?.({ files: [file] })) {

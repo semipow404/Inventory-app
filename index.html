@@ -54,11 +54,29 @@
     </form>
   </dialog>
 
+  <dialog id="yard-dialog">
+    <form method="dialog">
+      <h2>Product</h2>
+      <div class="code-fields">
+        <select id="y-style" aria-label="Style"></select>
+        <input id="y-number" aria-label="Number" autocomplete="off" autocapitalize="characters">
+        <input id="y-color" aria-label="Colour" autocomplete="off" autocapitalize="characters">
+      </div>
+      <p class="error"></p>
+      <menu>
+        <button value="save">Save</button>
+        <button value="cancel">Cancel</button>
+        <button value="delete" class="danger">Delete</button>
+      </menu>
+    </form>
+  </dialog>
+
   <dialog id="export-dialog">
     <form method="dialog">
       <h2>Export to Excel</h2>
       <label class="check"><input type="checkbox" id="x-map" checked> Stillage map</label>
       <label class="check"><input type="checkbox" id="x-count" checked> Stock count</label>
+      <label class="check"><input type="checkbox" id="x-yard" checked> Yard</label>
       <p class="error"></p>
       <menu>
         <button value="save">Export</button>
