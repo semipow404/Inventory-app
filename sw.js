@@ -1,5 +1,5 @@
 // Cache-first offline copy of the app. Bump CACHE on every release so installed phones fetch the new files.
-const CACHE = 'inventory-v7';
+const CACHE = 'inventory-v8';
 const FILES = ['./', 'index.html', 'style.css', 'app.js', 'logic.js', 'excel.js', 'exceljs.min.js', 'manifest.json', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {

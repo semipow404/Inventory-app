@@ -148,26 +148,19 @@ function graphHtml(p) {
 }
 
 // Partitions sit on the same 12×12 grid the Excel map uses (L.LAYOUTS), as CSS grid areas.
-// `graphs` adds the 30-day stock lines (the close-up, with usage on).
-// A list stillage is one box with its default code and product count, and no usage colours.
+// `graphs` adds the 30-day stock lines (the close-up, with usage on). A list partition shows "LIST" and its product
+// count, with no usage colour or graph.
 function boxHtml(lvl, label, q, boxAttrs, partAttrs = () => '', graphs = false) {
-  if (lvl.layout === L.LIST) {
-    const hit = lvl.parts.some(p => L.matches(p, q));
-    return `<div class="box" ${boxAttrs}>
-      <span class="label">${label}</span>
-      <div class="parts" data-n="1"><div class="part list-label${hit ? ' hit' : ''}" style="grid-area:1/1/span 12/span 12"><span class="txt">${esc(L.listLabel(lvl))}</span></div></div>
-    </div>`;
-  }
   const blocks = L.LAYOUTS.get(lvl.layout);
   return `<div class="box" ${boxAttrs}>
     <span class="label">${label}</span>
     <div class="parts${usageOn ? ' usage' : ''}" data-n="${lvl.parts.length}">${lvl.parts.map((p, i) => {
       const [x, y, w, h] = blocks[i];
       const area = `grid-area:${y + 1}/${x + 1}/span ${h}/span ${w}`;
-      const body = usageOn && L.hasProduct(p)
-        ? `${esc(L.code(p))}<b>${esc(p.stock ?? '–')}${p.full ? ` / ${esc(p.full)}` : ''}</b>`
+      const body = L.isList(p) ? `LIST<small>${L.productCount(p.list.length)}</small>`
+        : usageOn && L.hasProduct(p) ? `${esc(L.code(p))}<b>${esc(p.stock ?? '–')}${p.full ? ` / ${esc(p.full)}` : ''}</b>`
         : esc(L.code(p) || 'NA');
-      return `<div class="part${L.matches(p, q) ? ' hit' : ''}" style="${area}${usageOn ? `;background:${usageColour(p)}` : ''}" ${partAttrs(i)}>${
+      return `<div class="part${L.isList(p) ? ' list-part' : ''}${L.matches(p, q) ? ' hit' : ''}" style="${area}${usageOn ? `;background:${usageColour(p)}` : ''}" ${partAttrs(i)}>${
         graphs ? graphHtml(p) : ''}<span class="txt">${body}</span></div>`;
     }).join('')}</div>
   </div>`;
@@ -192,9 +185,6 @@ function rowHtml(row, r, q) {
   // What a tap does: open the close-up, or (in Move / Count mode) act on the partition itself.
   const taps = (c, l) => {
     const where = `data-r="${r}" data-c="${c}" data-l="${l}"`;
-    const isList = row.columns[c].levels[l].layout === L.LIST;
-    if (moving && isList) return ['', undefined];                                  // lists are skipped by Move
-    if (counting && isList) return [`role="button" data-action="open" ${where}`, undefined]; // pick the product in the close-up
     if (moving) return [picked?.whole && sameBox(picked, { r, c, l }) ? 'data-picked' : '',
       p => `role="button" data-action="pick" ${where} data-p="${p}"${picked && !picked.whole && samePart(picked, { r, c, l, p }) ? ' data-picked' : ''}`];
     if (counting) return ['', p => `role="button" data-action="quick-count" ${where} data-p="${p}"`];
@@ -287,6 +277,7 @@ Object.assign(actions, {
   async 'quick-count'({ r, c, l, p }) {
     const at = { r: +r, c: +c, l: +l, p: +p };
     const part = partAt(at);
+    if (L.isList(part)) return editPart(at); // a list is counted in its pop-up, one stock box per product
     if (!L.hasProduct(part)) return;
     $('#c-code').textContent = L.code(part);
     $('#c-current').textContent = part.stock ?? 'not counted';
@@ -324,65 +315,80 @@ Object.assign(views, {
     if (!lvl) return views.warehouse(); // stale link, e.g. after an import
     const label = L.LEVELS[l] + L.columnNumbers(state.rows[r])[c];
     const items = L.allParts(state).filter(x => x.r === r && x.c === c && x.l === l && L.hasProduct(x.part));
-    const isList = lvl.layout === L.LIST;
-    const tapPart = i => `role="button" data-action="edit-part" data-p="${i}"`;
-    const defaults = isList && editing ? `<div class="defaults">Default
-          <select id="d-style" aria-label="Default style">${styleOptions(lvl.defaults.style)}</select>
-          <input id="d-number" aria-label="Default number" placeholder="number" value="${esc(lvl.defaults.number)}" autocomplete="off" autocapitalize="characters">
-          <input id="d-color" aria-label="Default colour" placeholder="colour" value="${esc(lvl.defaults.color)}" autocomplete="off" autocapitalize="characters">
-        </div>` : '';
     return { title: 'Warehouse', search: true, html: `
       <div class="closeup">
-        ${boxHtml(lvl, label, query(), '', isList ? undefined : tapPart, usageOn)}
+        ${boxHtml(lvl, label, query(), '', i => `role="button" data-action="edit-part" data-p="${i}"`, usageOn)}
         ${editing ? `<label class="partitions">Partition
-          <select id="partitions">${[...L.LAYOUTS.keys(), L.LIST].map(id => `<option${id === lvl.layout ? ' selected' : ''}>${id}</option>`).join('')}</select>
+          <select id="partitions">${[...L.LAYOUTS.keys()].map(id => `<option${id === lvl.layout ? ' selected' : ''}>${id}</option>`).join('')}</select>
         </label>
-        ${defaults}
         <button class="danger" data-action="delete-col">Delete column</button>` : ''}
-        ${isList ? '<button class="add-item" data-action="add-item">Add product</button>' : ''}
-      </div>${listHtml(items, 'closeup-list', isList ? x => tapPart(x.p) : undefined)}` };
+      </div>${listHtml(items, 'closeup-list')}` };
   },
 });
 
-// The product pop-up. List products have no Full box (no usage colours) and can be removed.
-// Resolves with the saved partition, 'delete', or null when cancelled.
-async function editPartDialog(part, { inList = false, removable = false } = {}) {
+// ---- Product pop-up: one product, or with List ticked, a list of products with a stock box each.
+// Nothing changes until Save, so Cancel undoes adds and removals.
+let draft = null; // the list being edited: { items, typed }, typed[i] being what's in items[i]'s stock box
+const nameFields = () => ({ style: $('#p-style').value, number: $('#p-number').value, color: $('#p-color').value });
+const listOn = () => $('#p-is-list').checked;
+
+function drawDraft() {
+  $('#p-single').hidden = listOn();
+  $('#p-list-section').hidden = !listOn();
+  $('#p-list').innerHTML = draft.items.map((x, i) => `<div class="list-line">
+      <span>${esc(L.code(x))}</span>
+      <label>Stock <input class="list-stock" data-i="${i}" inputmode="numeric" autocomplete="off" placeholder="${esc(x.stock ?? '')}" value="${esc(draft.typed[i])}"></label>
+      <button type="button" class="list-remove" data-action="list-remove" data-i="${i}" aria-label="Remove ${esc(L.code(x))}">✕</button>
+    </div>`).join('') || '<p class="muted">No products yet</p>';
+}
+
+$('#p-list').addEventListener('input', e => { if (e.target.dataset.i) draft.typed[e.target.dataset.i] = e.target.value; });
+$('#p-is-list').addEventListener('change', e => {
+  if (!e.target.checked && draft.items.length && !confirm('Turn off List? Only the code in the name fields will be kept.')) e.target.checked = true;
+  drawDraft();
+});
+// In a list, Enter in a name field adds that product rather than saving the pop-up.
+partDialog.querySelector('.code-fields').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && listOn()) { e.preventDefault(); actions['list-add'](); }
+});
+
+async function editPart(at) {
+  const part = partAt(at), wasList = L.isList(part);
   $('#p-style').innerHTML = styleOptions(part.style);
   $('#p-number').value = part.number;
   $('#p-color').value = part.color;
   $('#p-stock').value = part.stock ?? '';
   $('#p-full').value = part.full ?? '';
-  $('#p-full-label').hidden = inList;
-  partDialog.querySelector('[value=delete]').hidden = !removable;
   const counted = L.lastCounted(part);
   $('#p-counted').textContent = counted ? `Last counted ${longDate(counted)}` : 'Not counted yet';
+  $('#p-is-list').checked = wasList;
+  // Ticking List on a partition with a product makes that product the list's first.
+  const items = wasList ? part.list : L.hasProduct(part) ? [part] : [];
+  draft = { items, typed: items.map(() => '') };
+  drawDraft();
   let made;
-  const check = () => (made = L.makePart({
-    style: $('#p-style').value, number: $('#p-number').value, color: $('#p-color').value,
-    stock: $('#p-stock').value, full: $('#p-full').value,
-  }, part)).error;
-  const choice = await ask(partDialog, check);
-  return choice === 'save' ? made.part : choice === 'delete' ? 'delete' : null;
+  const check = () => (made = listOn()
+    ? L.makeList(nameFields(), draft.items, draft.typed)
+    : L.makePart({ ...nameFields(), stock: $('#p-stock').value, full: $('#p-full').value }, wasList ? L.emptyPart() : part)).error;
+  if (await ask(partDialog, check) !== 'save') return;
+  state.rows[at.r].columns[at.c].levels[at.l].parts[at.p] = made.part;
+  commit();
 }
 
 Object.assign(actions, {
-  async 'edit-part'({ p }) {
-    const { lvl } = here();
-    const inList = lvl.layout === L.LIST;
-    const result = await editPartDialog(lvl.parts[p], { inList, removable: inList });
-    if (!result) return;
-    if (inList && (result === 'delete' || !L.hasProduct(result))) {        // Remove, or the code was cleared
-      if (!confirm(`Remove ${L.code(lvl.parts[p])} from this list?`)) return;
-      lvl.parts.splice(Number(p), 1);
-    } else lvl.parts[p] = result;
-    commit();
+  'edit-part'({ p }) { const { r, c, l } = here(); return editPart({ r, c, l, p: +p }); },
+  'list-add'() {
+    const res = L.addToList(draft.items, nameFields());
+    partDialog.querySelector('.error').textContent = res.error ?? '';
+    if (res.error) return;
+    draft.items = res.items;
+    draft.typed.push('');
+    drawDraft();
   },
-  async 'add-item'() {
-    const { lvl } = here();
-    const result = await editPartDialog(L.newListItem(lvl), { inList: true });
-    if (!result || !L.hasProduct(result)) return;
-    lvl.parts.push(result);
-    commit();
+  'list-remove'({ i }) {
+    draft.items = draft.items.filter((_, k) => k !== +i);
+    draft.typed.splice(+i, 1);
+    drawDraft();
   },
   'delete-col'() {
     const { r, c } = here();
@@ -394,15 +400,10 @@ Object.assign(actions, {
 });
 
 document.addEventListener('change', e => {
-  const { lvl } = here();
-  if (['d-style', 'd-number', 'd-color'].includes(e.target.id)) { // a list's default code
-    lvl.defaults = { style: $('#d-style').value, number: $('#d-number').value.trim().toUpperCase(), color: $('#d-color').value.trim().toUpperCase() };
-    return commit();
-  }
   if (e.target.id !== 'partitions') return;
+  const { lvl } = here();
   const id = e.target.value;
-  const fits = id === L.LIST ? Infinity : L.LAYOUTS.get(id).length; // a list holds every product
-  if (L.dropsProducts(lvl, fits) && !confirm('Fewer partitions will remove the products in the ones dropped. Continue?')) return render();
+  if (L.dropsProducts(lvl, L.LAYOUTS.get(id).length) && !confirm('Fewer partitions will remove the products in the ones dropped. Continue?')) return render();
   L.setLayout(lvl, id);
   commit();
 });

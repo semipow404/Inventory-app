@@ -69,22 +69,30 @@
 
   <dialog id="part-dialog">
     <form method="dialog">
-      <h2>Name</h2>
+      <div class="dlg-head">
+        <h2>Name</h2>
+        <label class="check list-check">List <input type="checkbox" id="p-is-list"></label>
+      </div>
       <div class="code-fields">
         <select id="p-style" aria-label="Style"></select>
         <input id="p-number" aria-label="Number" autocomplete="off" autocapitalize="characters">
         <input id="p-color" aria-label="Colour" autocomplete="off" autocapitalize="characters">
       </div>
-      <div class="numbers">
-        <label class="stock">Stock <input id="p-stock" inputmode="numeric" autocomplete="off"></label>
-        <label class="stock" id="p-full-label">Full <input id="p-full" inputmode="numeric" autocomplete="off"></label>
+      <div id="p-single">
+        <div class="numbers">
+          <label class="stock">Stock <input id="p-stock" inputmode="numeric" autocomplete="off"></label>
+          <label class="stock">Full <input id="p-full" inputmode="numeric" autocomplete="off"></label>
+        </div>
+        <p id="p-counted"></p>
       </div>
-      <p id="p-counted"></p>
+      <div id="p-list-section" hidden>
+        <button type="button" class="add-item" data-action="list-add">Add product</button>
+        <div id="p-list"></div>
+      </div>
       <p class="error"></p>
       <menu>
         <button value="save">Save</button>
         <button value="cancel">Cancel</button>
-        <button value="delete" class="danger" hidden>Remove</button>
       </menu>
     </form>
   </dialog>

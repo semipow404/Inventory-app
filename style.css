@@ -112,11 +112,15 @@ dialog input, dialog select { padding: 6px; border-radius: 6px; border: 0; }
 dialog menu { display: flex; flex-direction: row-reverse; gap: 8px; margin: 16px 0 0; padding: 0; }
 .error { min-height: 1em; margin: 6px 0 0; color: #ff8080; }
 
-/* List stillages: default-code box on the map; defaults, Add product and tappable lines in the close-up */
-.part.list-label { font-size: .8rem; }
-.closeup .part.list-label { font-size: 1.1rem; }
-.defaults { display: flex; align-items: center; gap: 6px; width: min(300px, 100%); }
-.defaults select, .defaults input { flex: 1; min-width: 0; padding: 6px; border-radius: 6px; border: 0; }
+/* List partitions: "LIST" tile on the map; List box, Add product and a stock box per product in the pop-up */
+.part.list-part { flex-direction: column; background: #2f3247; }
+.part.list-part small { display: block; font-size: .85em; opacity: .85; }
+.dlg-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.dlg-head h2 { margin: 0; }
+.list-check { padding: 0; }
 .add-item { background: var(--hit); color: #fff; border: 0; border-radius: 6px; padding: 8px 16px; }
-.list tr[role=button] { cursor: pointer; }
-.list tr[role=button] td:first-child { text-decoration: underline dotted; }
+#p-list { max-height: 40vh; overflow-y: auto; margin-top: 10px; border-top: 2px solid #ddd; }
+.list-line { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
+.list-line span { flex: 1; word-break: break-all; }
+.list-line input { width: 4em; margin-left: 4px; }
+.list-remove { background: none; border: 0; color: var(--text); font-size: 1.1rem; padding: 2px 6px; }
