@@ -253,6 +253,18 @@ export function summary(state) {
   };
 }
 
+// Specials: stillages of custom products, checked against their order sheets using photos. Each has its arrival
+// date, one stillage photo and any number of order sheet photos (photo ids; the photos live in the app's photo store).
+export function newSpecial(date, id) {
+  const ok = /^\d{4}-\d{2}-\d{2}$/.test(date) && !Number.isNaN(Date.parse(date));
+  return ok ? { special: { id, date, stillage: null, sheets: [] } } : { error: 'Pick the date it came in.' };
+}
+
+export const sortSpecials = list => [...list].sort((a, b) => a.date.localeCompare(b.date)); // stable: same day keeps creation order
+export const dmy = iso => iso.split('-').reverse().join('-');
+export const specialPhotos = sp => [sp.stillage, ...sp.sheets].filter(Boolean);
+export const removePhoto = (sp, id) => ({ ...sp, stillage: sp.stillage === id ? null : sp.stillage, sheets: sp.sheets.filter(x => x !== id) });
+
 // Local date as YYYY-MM-DD (toISOString would give the UTC date, off by one near midnight).
 export const ymd = (d = new Date()) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
