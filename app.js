@@ -89,6 +89,14 @@ Object.assign(views, {
         <input name="code" placeholder="e.g. LSW" autocomplete="off" autocapitalize="characters">
         <button>Add</button>
       </form>
+      <h2>Bulk types</h2>
+      <ul>${state.yard.map(({ name }, i) => `
+        <li>${esc(name)} <button data-action="remove-bulk" data-i="${i}" aria-label="Remove ${esc(name)}">✕</button></li>`).join('')
+        || '<li class="muted">No bulk types yet</li>'}</ul>
+      <form data-action="add-bulk">
+        <input name="code" placeholder="e.g. Black Bulk" autocomplete="off">
+        <button>Add</button>
+      </form>
     </section>` }),
 });
 
@@ -99,6 +107,17 @@ Object.assign(actions, {
     commit();
   },
   'remove-style'({ i }) { state.styles.splice(Number(i), 1); commit(); },
+  'add-bulk'(_, form) {
+    const error = L.addBulkType(state, form.elements.code.value);
+    if (error) return alert(error);
+    commit();
+  },
+  'remove-bulk'({ i }) { // its cards go with it, so ask first if it has any
+    const { name, rows } = state.yard[i], n = rows.flat().length;
+    if (n && !confirm(`Remove ${name} and its ${L.productCount(n)} from the yard?`)) return;
+    state.yard.splice(Number(i), 1);
+    commit();
+  },
 });
 
 // ---- Dialogs
@@ -423,15 +442,15 @@ function yardCardHtml(s, r, c, card) {
 }
 
 Object.assign(views, {
-  yard: () => ({ title: 'Yard', html: `<div class="yard-page" data-scroll="yard">${L.YARD_SECTIONS.map(([s, name]) => `
+  yard: () => ({ title: 'Yard', html: `<div class="yard-page" data-scroll="yard">${state.yard.map(({ name, rows }, s) => `
     <section class="yard-section">
-      <h2>${name}</h2>
-      ${state.yard[s].map((row, r) => `<div class="yard-row" data-scroll="yard-${s}-${r}">
+      <h2>${esc(name)}</h2>
+      ${rows.map((row, r) => `<div class="yard-row" data-scroll="yard-${s}-${r}">
         ${row.map((card, c) => yardCardHtml(s, r, c, card)).join('')}
         <button class="yard-add" data-action="yard-add-card" data-s="${s}" data-r="${r}" aria-label="Add a product to this row">+</button>
       </div>`).join('')}
-      <button class="yard-add" data-action="yard-add-row" data-s="${s}" aria-label="Add a row to ${name}">+</button>
-    </section>`).join('')}</div>` }),
+      <button class="yard-add" data-action="yard-add-row" data-s="${s}" aria-label="Add a row to ${esc(name)}">+</button>
+    </section>`).join('') || '<p class="muted">Add a bulk type in Settings to start.</p>'}</div>` }),
 });
 
 // The yard card pop-up: resolves with the new card's code fields, 'delete', or null when cancelled.
@@ -448,29 +467,29 @@ async function askYardCard(card, deletable) {
 
 Object.assign(actions, {
   'yard-step'({ s, r, c, d }) {
-    const card = state.yard[s][r][c];
+    const card = state.yard[s].rows[r][c];
     card.count = L.stepCount(card.count, Number(d));
     commit();
   },
   async 'yard-add-card'({ s, r }) {
     const card = await askYardCard({ style: '', number: '', color: '' }, false);
     if (!card || card === 'delete') return;
-    state.yard[s][r].push(card);
+    state.yard[s].rows[r].push(card);
     commit();
   },
   async 'yard-add-row'({ s }) { // a new row starts with its first product, so no empty rows
     const card = await askYardCard({ style: '', number: '', color: '' }, false);
     if (!card || card === 'delete') return;
-    state.yard[s].push([card]);
+    state.yard[s].rows.push([card]);
     commit();
   },
   async 'yard-edit'({ s, r, c }) {
-    const row = state.yard[s][r], card = row[c];
+    const rows = state.yard[s].rows, row = rows[r], card = row[c];
     const result = await askYardCard(card, true);
     if (result === 'delete') {
       if (!confirm(`Delete ${L.code(card)} from the yard?`)) return;
       row.splice(Number(c), 1);
-      if (!row.length) state.yard[s].splice(Number(r), 1); // a row left empty goes too
+      if (!row.length) rows.splice(Number(r), 1); // a row left empty goes too
     } else if (result) Object.assign(card, { style: result.style, number: result.number, color: result.color });
     else return;
     commit();
