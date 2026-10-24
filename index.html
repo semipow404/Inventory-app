@@ -72,6 +72,43 @@
     </form>
   </dialog>
 
+  <dialog id="special-dialog">
+    <form method="dialog">
+      <h2>Arrival date</h2>
+      <input type="date" id="sp-date">
+      <p class="error"></p>
+      <menu>
+        <button value="save" id="sp-save">Create</button>
+        <button value="cancel">Cancel</button>
+        <button value="delete" class="danger">Delete special</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <dialog id="add-photo-dialog">
+    <form method="dialog">
+      <h2>Add a photo</h2>
+      <div class="photo-choices">
+        <button type="button" data-action="photo-camera">Take photo</button>
+        <button type="button" data-action="photo-files">Choose from files</button>
+      </div>
+      <menu><button value="cancel">Cancel</button></menu>
+    </form>
+  </dialog>
+
+  <dialog id="photo-dialog" class="photo-viewer">
+    <form method="dialog">
+      <div class="photo-frame"><img id="viewer-img" data-action="photo-zoom" alt="Photo"></div>
+      <menu>
+        <button value="cancel">Close</button>
+        <button type="button" class="danger" data-action="photo-delete">Delete photo</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <input type="file" id="camera-input" accept="image/*" capture="environment" hidden>
+  <input type="file" id="files-input" accept="image/*" hidden>
+
   <dialog id="export-dialog">
     <form method="dialog">
       <h2>Export to Excel</h2>

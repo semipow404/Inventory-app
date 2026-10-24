@@ -20,7 +20,8 @@ function save() {
 
 function commit() { save(); render(); }
 
-// views: name → (...args) => { title, html, search }. actions: data-action name → (dataset, element).
+// views: name → (...args) => { title, html, search, after }; `after` runs once the html is on the page.
+// actions: data-action name → (dataset, element).
 const views = {};
 const actions = { back: () => history.back() };
 
@@ -49,6 +50,7 @@ function render() {
     const saved = scrollMemory.get(el.dataset.scroll);
     if (saved) [el.scrollLeft, el.scrollTop] = saved;
   });
+  v.after?.();
 }
 
 document.addEventListener('click', e => {
@@ -63,7 +65,12 @@ document.addEventListener('submit', e => {
 });
 window.addEventListener('hashchange', render);
 // Another tab or the installed app saved: reload, so this page's older copy can't overwrite it on its next save.
-window.addEventListener('storage', e => { if (e.key === KEY) { state = load(); render(); } });
+window.addEventListener('storage', e => {
+  if (e.key === KEY) state = load();
+  else if (e.key === SPECIALS_KEY) specials = loadSpecials();
+  else return;
+  render();
+});
 
 // ---- Home and Settings
 Object.assign(views, {
@@ -71,7 +78,7 @@ Object.assign(views, {
     <nav class="home">
       <a class="big warehouse" href="#warehouse">Warehouse</a>
       <a class="big yard" href="#yard">Yard</a>
-      <button class="big store" disabled>Store</button>
+      <a class="big store" href="#specials">Specials</a>
       <div class="pair">
         <button class="io" data-action="import">Import</button>
         <button class="io" data-action="export">Export</button>
@@ -505,6 +512,141 @@ Object.assign(actions, {
     else return;
     commit();
   },
+});
+
+// ---- Specials: stillages of custom products, checked against their order sheets using photos. Kept apart from the
+// warehouse data (their own storage key, photos in IndexedDB), so Export and Import never touch them.
+const SPECIALS_KEY = 'inventory-app-specials';
+let specials = loadSpecials();
+function loadSpecials() { try { return JSON.parse(localStorage.getItem(SPECIALS_KEY)) ?? []; } catch { return []; } }
+function saveSpecials() {
+  try { localStorage.setItem(SPECIALS_KEY, JSON.stringify(specials)); $('#banner').hidden = true; } catch { $('#banner').hidden = false; }
+  render();
+}
+const specialById = id => specials.find(sp => sp.id === id);
+
+// The photo store: IndexedDB holds far more than localStorage. One connection per request keeps it simple.
+function photoRequest(mode, makeRequest) {
+  return new Promise((resolve, reject) => {
+    const open = indexedDB.open('inventory-app-photos', 1);
+    open.onupgradeneeded = () => open.result.createObjectStore('photos');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const req = makeRequest(open.result.transaction('photos', mode).objectStore('photos'));
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    };
+  });
+}
+const putPhoto = (id, blob) => photoRequest('readwrite', s => s.put(blob, id));
+const getPhoto = id => photoRequest('readonly', s => s.get(id));
+const deletePhoto = id => photoRequest('readwrite', s => s.delete(id)).catch(() => {});
+
+// Camera photos are large: keep at most 2000px on the long side (order sheets stay readable), as a JPEG.
+async function shrinkPhoto(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; img.src = url; }); // decode() can stall in a hidden page
+    const scale = Math.min(1, 2000 / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = Object.assign(document.createElement('canvas'),
+      { width: Math.round(img.naturalWidth * scale), height: Math.round(img.naturalHeight * scale) });
+    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+    return await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+  } finally { URL.revokeObjectURL(url); }
+}
+
+// Pictures go on the page after it renders: each <img data-photo> gets its photo, read once per visit.
+const photoUrls = new Map();
+async function photoUrl(id) {
+  if (!photoUrls.has(id)) photoUrls.set(id, await getPhoto(id).then(b => (b ? URL.createObjectURL(b) : ''), () => ''));
+  return photoUrls.get(id);
+}
+const fillPhotos = () => document.querySelectorAll('img[data-photo]').forEach(async img => { img.src = await photoUrl(img.dataset.photo); });
+
+const photoThumb = (sp, id) => `<img class="thumb" data-photo="${id}" role="button" data-action="photo-view" data-sp="${sp.id}" data-id="${id}" alt="Photo">`;
+const addPhotoButton = (sp, kind) => `<button class="photo-add" data-action="photo-add" data-sp="${sp.id}" data-kind="${kind}"
+  aria-label="${kind === 'stillage' ? 'Add the stillage photo' : 'Add an order sheet photo'}">+</button>`;
+
+Object.assign(views, {
+  specials: () => ({ title: 'Specials', after: fillPhotos, html: `<div class="specials-page" data-scroll="specials">
+    ${L.sortSpecials(specials).map(sp => `<section class="special">
+      <button class="special-date" data-action="special-edit" data-sp="${sp.id}">${L.dmy(sp.date)}</button>
+      <div class="special-box">
+        <div class="special-col"><h3>Stillage</h3>${sp.stillage ? photoThumb(sp, sp.stillage) : addPhotoButton(sp, 'stillage')}</div>
+        <div class="special-col sheets"><h3>Order sheet(s)</h3>
+          <div class="sheet-row">${sp.sheets.map(id => photoThumb(sp, id)).join('')}${addPhotoButton(sp, 'sheet')}</div>
+        </div>
+      </div>
+    </section>`).join('') || '<p class="muted">No specials yet. Tap + when one comes in.</p>'}
+    <button class="yard-add" data-action="special-new" aria-label="New special">+</button>
+  </div>` }),
+});
+
+// The arrival date pop-up: resolves with the chosen date, 'delete' or 'cancel'.
+const specialDialog = $('#special-dialog');
+async function askDate(date, editing) {
+  $('#sp-date').value = date;
+  $('#sp-save').textContent = editing ? 'Save' : 'Create';
+  specialDialog.querySelector('[value=delete]').hidden = !editing;
+  const choice = await ask(specialDialog, () => L.newSpecial($('#sp-date').value, '').error);
+  return choice === 'save' ? $('#sp-date').value : choice;
+}
+
+let photoTarget = null; // { sp, kind } waiting for the camera or a file
+let viewing = null;     // { sp, id } shown full screen
+
+Object.assign(actions, {
+  async 'special-new'() {
+    const date = await askDate(L.ymd(), false);
+    if (date === 'cancel' || date === 'delete') return;
+    specials.push(L.newSpecial(date, crypto.randomUUID()).special);
+    saveSpecials();
+  },
+  async 'special-edit'({ sp }) {
+    const special = specialById(sp);
+    const result = await askDate(special.date, true);
+    if (result === 'cancel') return;
+    if (result === 'delete') {
+      const photos = L.specialPhotos(special);
+      if (!confirm(`Delete the special from ${L.dmy(special.date)}${photos.length ? ` and its ${photos.length} photo${photos.length === 1 ? '' : 's'}` : ''}?`)) return;
+      specials = specials.filter(x => x !== special);
+      photos.forEach(deletePhoto);
+    } else special.date = result;
+    saveSpecials();
+  },
+  'photo-add'({ sp, kind }) { photoTarget = { sp, kind }; $('#add-photo-dialog').showModal(); },
+  'photo-camera'() { $('#add-photo-dialog').close(); $('#camera-input').click(); },
+  'photo-files'() { $('#add-photo-dialog').close(); $('#files-input').click(); },
+  async 'photo-view'({ sp, id }) {
+    viewing = { sp, id };
+    $('#viewer-img').classList.remove('zoomed');
+    $('#viewer-img').src = await photoUrl(id);
+    $('#photo-dialog').showModal();
+  },
+  'photo-zoom'(_, img) { img.classList.toggle('zoomed'); }, // full size, to scroll around small print
+  'photo-delete'() {
+    if (!confirm('Delete this photo?')) return;
+    const special = specialById(viewing.sp);
+    Object.assign(special, L.removePhoto(special, viewing.id));
+    deletePhoto(viewing.id);
+    $('#photo-dialog').close();
+    saveSpecials();
+  },
+});
+
+for (const input of [$('#camera-input'), $('#files-input')]) input.addEventListener('change', async e => {
+  const file = e.target.files[0], target = photoTarget;
+  e.target.value = ''; // lets the same file be picked again
+  const special = target && specialById(target.sp);
+  if (!file || !special) return;
+  try {
+    const id = crypto.randomUUID();
+    await putPhoto(id, await shrinkPhoto(file));
+    if (target.kind === 'stillage') special.stillage = id;
+    else special.sheets.push(id);
+    saveSpecials();
+  } catch { alert("Couldn't save that photo on this device."); }
 });
 
 // ---- Excel import / export

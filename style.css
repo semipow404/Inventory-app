@@ -141,3 +141,24 @@ dialog menu { display: flex; flex-direction: row-reverse; gap: 8px; margin: 16px
 .yard-table th { text-align: left; font-weight: 400; padding: 6px; border-bottom: 2px solid var(--line); }
 .yard-table td { padding: 4px 6px; }
 #y-holds { width: 5em; margin-left: 6px; }
+
+/* Specials: a box per stillage with its photo and order sheet photos; full-screen photo viewer */
+.specials-page { flex: 1; overflow-y: auto; padding: 8px 12px 24px; }
+.special { margin-bottom: 16px; }
+.special-date { padding: 4px 0; background: none; border: 0; color: var(--text); font-size: 1rem; font-weight: 600; text-decoration: underline dotted; }
+.special-box { display: flex; gap: 16px; border: 3px solid var(--line); border-radius: 8px; padding: 10px; }
+.special-col { flex: none; min-width: 0; }
+.special-col.sheets { flex: 1; }
+.special-col h3 { margin: 0 0 6px; font-size: .85rem; font-weight: 400; }
+.sheet-row { display: flex; align-items: center; gap: 8px; overflow-x: auto; }
+.thumb { flex: none; width: 72px; height: 96px; object-fit: cover; background: #fff; border-radius: 4px; cursor: pointer; }
+.photo-add { flex: none; width: 72px; height: 96px; background: var(--line); color: #fff; border: 0; border-radius: 6px; font-size: 1.8rem; }
+.photo-choices { display: flex; flex-direction: column; gap: 10px; }
+.photo-choices button { padding: 12px; border: 0; border-radius: 6px; font-size: 1rem; }
+#sp-date { width: 100%; }
+dialog.photo-viewer { width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border-radius: 0; background: #000; }
+.photo-viewer form { display: flex; flex-direction: column; height: 100%; }
+.photo-frame { flex: 1; min-height: 0; overflow: auto; }
+#viewer-img { display: block; width: 100%; height: 100%; object-fit: contain; }
+#viewer-img.zoomed { width: auto; height: auto; max-width: none; }
+.photo-viewer menu { margin: 0; padding: 10px; }
