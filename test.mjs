@@ -181,9 +181,9 @@ assert.deepEqual(lvl.parts[1], p);
   assert.match(L.newSpecial('', 'x').error, /date/);
   assert.match(L.newSpecial('24/10/2026', 'x').error, /date/);
   assert.equal(L.dmy('2026-10-24'), '24-10-2026');
-  // Oldest first; specials from the same day keep the order they were made in
+  // Newest first, under the + at the top; on the same day the one made last is on top
   const list = [{ id: 'c', date: '2026-10-24' }, { id: 'a', date: '2026-10-20' }, { id: 'd', date: '2026-10-24' }, { id: 'b', date: '2026-10-22' }];
-  assert.deepEqual(L.sortSpecials(list).map(x => x.id), ['a', 'b', 'c', 'd']);
+  assert.deepEqual(L.sortSpecials(list).map(x => x.id), ['d', 'c', 'b', 'a']);
   assert.deepEqual(list.map(x => x.id), ['c', 'a', 'd', 'b']);              // the original isn't reordered
   // Photos: removing one clears it from wherever it was; a special's photos are its stillage photo and sheets
   const sp = { ...made, stillage: 'p1', sheets: ['p2', 'p3'] };

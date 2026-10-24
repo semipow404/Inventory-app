@@ -146,6 +146,7 @@ dialog menu { display: flex; flex-direction: row-reverse; gap: 8px; margin: 16px
 
 /* Specials: a box per stillage with its photo and order sheet photos; full-screen photo viewer */
 .specials-page { flex: 1; overflow-y: auto; padding: 8px 12px 24px; }
+.specials-page > .yard-add { display: block; margin: 4px 0 12px; }
 .special { margin-bottom: 16px; }
 .special-date { padding: 4px 0; background: none; border: 0; color: var(--text); font-size: 1rem; font-weight: 600; text-decoration: underline dotted; }
 .special-box { display: flex; gap: 16px; border: 3px solid var(--line); border-radius: 8px; padding: 10px; }

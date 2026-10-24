@@ -262,7 +262,7 @@ export function newSpecial(date, id) {
   return ok ? { special: { id, date, stillage: null, sheets: [] } } : { error: 'Pick the date it came in.' };
 }
 
-export const sortSpecials = list => [...list].sort((a, b) => a.date.localeCompare(b.date)); // stable: same day keeps creation order
+export const sortSpecials = list => [...list].reverse().sort((a, b) => b.date.localeCompare(a.date)); // stable sort of the reversed list: same day, last made on top
 export const dmy = iso => iso.split('-').reverse().join('-');
 export const specialPhotos = sp => [sp.stillage, ...sp.sheets].filter(Boolean);
 export const removePhoto = (sp, id) => ({ ...sp, stillage: sp.stillage === id ? null : sp.stillage, sheets: sp.sheets.filter(x => x !== id) });

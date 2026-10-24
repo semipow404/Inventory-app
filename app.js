@@ -577,6 +577,7 @@ const addPhotoButton = (sp, kind) => `<button class="photo-add" data-action="pho
   aria-label="${kind === 'stillage' ? 'Add the stillage photo' : 'Add an order sheet photo'}">+</button>`;
 
 const photoPageView = page => () => ({ title: PHOTO_PAGES[page].title, after: fillPhotos, html: `<div class="specials-page" data-scroll="${page}">
+    <button class="yard-add" data-action="special-new" aria-label="New entry">+</button>
     ${L.sortSpecials(photoLists[page]).map(sp => `<section class="special">
       <button class="special-date" data-action="special-edit" data-sp="${sp.id}">${L.dmy(sp.date)}</button>
       <div class="special-box">
@@ -586,7 +587,6 @@ const photoPageView = page => () => ({ title: PHOTO_PAGES[page].title, after: fi
         </div>
       </div>
     </section>`).join('') || '<p class="muted">Nothing here yet. Tap + when a stillage comes in.</p>'}
-    <button class="yard-add" data-action="special-new" aria-label="New entry">+</button>
   </div>` });
 Object.assign(views, { specials: photoPageView('specials'), split: photoPageView('split') });
 
