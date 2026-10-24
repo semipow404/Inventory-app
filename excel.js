@@ -59,10 +59,12 @@ function writeCount(ws, state, date) {
 
 // The yard, for reading in Excel (yard counts are changed in the app): title, header, one line per product card.
 function writeYard(ws, state, date) {
-  ws.columns = [14, 6, 20, 10].map(width => ({ width }));
+  ws.columns = [14, 6, 20, 10, 8, 10].map(width => ({ width }));
   Object.assign(ws.getCell(1, 1), { value: `Yard — ${ymd(date)}`, font: { bold: true, size: 14 } });
-  ['Section', 'Row', 'Product', 'Stillages'].forEach((h, i) => Object.assign(ws.getCell(2, i + 1), { value: h, font: { bold: true }, border: { bottom: THIN } }));
-  yardLines(state).forEach((x, n) => [x.section, x.row, x.product, x.stillages].forEach((v, i) => { ws.getCell(3 + n, i + 1).value = v; }));
+  ['Section', 'Row', 'Product', 'Stillages', 'Holds', 'Total'].forEach((h, i) =>
+    Object.assign(ws.getCell(2, i + 1), { value: h, font: { bold: true }, border: { bottom: THIN } }));
+  yardLines(state).forEach((x, n) =>
+    [x.section, x.row, x.product, x.stillages, x.holds, x.total].forEach((v, i) => { ws.getCell(3 + n, i + 1).value = v; }));
 }
 
 export async function exportWorkbook(ExcelJS, state, { date = new Date(), chunk = 30000, map = true, count = true, yard = true } = {}) {
@@ -95,7 +97,8 @@ const isLevel = lvl => LAYOUTS.has(lvl?.layout) && Array.isArray(lvl.parts) &&
   lvl.parts.length === LAYOUTS.get(lvl.layout).length && lvl.parts.every(isPart);
 const isColumn = col => (col?.type === 'space' && isText(col.name)) ||
   (col?.type === 'stillage' && Array.isArray(col.levels) && col.levels.length === LEVELS.length && col.levels.every(isLevel));
-const isCard = c => isText(c?.style) && isText(c.number) && isText(c.color) && typeof c.count === 'number' && c.count >= 0 && Number.isInteger(c.count * 4);
+const isCard = c => isText(c?.style) && isText(c.number) && isText(c.color) &&
+  typeof c.count === 'number' && c.count >= 0 && Number.isInteger(c.count * 4) && (c.holds === null || isWhole(c.holds, 1));
 const isYard = y => Array.isArray(y) && y.every(s =>
   isText(s?.name) && Array.isArray(s.rows) && s.rows.every(row => Array.isArray(row) && row.every(isCard)));
 const isState = s => Array.isArray(s?.styles) && s.styles.every(isText) && isYard(s.yard) &&

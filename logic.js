@@ -34,16 +34,35 @@ export function addBulkType(state, name) {
   return null;
 }
 
+// `holds` (optional) is how much product one bulk stillage of it holds.
 export function makeYardCard(fields) {
-  const card = { ...cleanCode(fields), count: 0 };
-  return code(card) ? { card } : { error: 'Enter a code.' };
+  const holds = (fields.holds ?? '').trim();
+  const card = { ...cleanCode(fields), count: 0, holds: holds === '' ? null : Number(holds) };
+  if (!code(card)) return { error: 'Enter a code.' };
+  if (holds !== '' && !/^[1-9]\d*$/.test(holds)) return { error: 'Holds must be a whole number, 1 or more.' };
+  return { card };
 }
+
+const cardTotal = card => (card.holds === null ? null : card.count * card.holds);
 
 // +1 / −1 / +½ / −½ / +¼ / −¼, kept to exact quarters and never below 0.
 export const stepCount = (count, delta) => Math.max(0, Math.round((count + delta) * 4) / 4);
 
 export const yardLines = state => state.yard.flatMap(({ name, rows }) => rows.flatMap((row, r) =>
-  row.map(card => ({ section: name, row: r + 1, product: code(card), stillages: card.count }))));
+  row.map(card => ({ section: name, row: r + 1, product: code(card), stillages: card.count, holds: card.holds, total: cardTotal(card) }))));
+
+// The table under the yard: each product code once, its stillages and total product added up across every card
+// and bulk type, sorted by code. The total is unknown (null) if any of its cards has no "holds".
+export function yardTotals(state) {
+  const byCode = new Map();
+  for (const line of yardLines(state)) {
+    const t = byCode.get(line.product) ?? { product: line.product, stillages: 0, total: 0 };
+    t.stillages += line.stillages;
+    t.total = t.total === null || line.total === null ? null : t.total + line.total;
+    byCode.set(line.product, t);
+  }
+  return [...byCode.values()].sort((a, b) => a.product.localeCompare(b.product));
+}
 // full: what "full" means for this partition (for the usage colours). counts: the last COUNTS_KEPT counts, newest last.
 export const emptyPart = () => ({ style: '', number: '', color: '', stock: null, full: null, counts: [] });
 export const COUNTS_KEPT = 30;
@@ -138,6 +157,7 @@ export function migrate(state) {
     }
     for (const section of list(state.yard)) { // that release could also leave empty rows behind
       if (Array.isArray(section?.rows)) section.rows = section.rows.filter(row => !Array.isArray(row) || row.length);
+      for (const card of list(section?.rows).flatMap(list)) if (card && card.holds === undefined) card.holds = null;
     }
   }
   for (const row of list(state?.rows)) for (const col of list(row?.columns)) {
