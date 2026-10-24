@@ -19,18 +19,20 @@ export const LAYOUTS = new Map([
   ['16', grid(4, 4)],
 ]);
 
-export const newState = () => ({ styles: [], rows: [], yard: startingYard() });
+export const newState = () => ({ styles: [], rows: [], yard: startingYard(), offsite: startingYard() });
 
-// The yard: bulk stillages waiting to come into the warehouse, in sections ("bulk types", managed in Settings like
-// product styles). Each is a list of rows of cards; a card is a product code and how many stillages of it there
-// are, in quarters. A row only exists with a card in it.
+// Bulk areas: the yard (bulk stillages waiting to come into the warehouse) and offsite work the same way, each with
+// its own list. An area is a list of sections ("bulk types", managed in Settings like product styles); each is a
+// list of rows of cards; a card is a product code and how many stillages of it there are, in quarters.
+// A row only exists with a card in it.
+export const BULK_AREAS = ['yard', 'offsite'];
 const startingYard = () => [{ name: 'White Bulk', rows: [] }, { name: 'Other Bulk', rows: [] }];
 
-export function addBulkType(state, name) {
+export function addBulkType(sections, name) {
   name = name.trim();
   if (!name) return 'Enter a bulk type.';
-  if (state.yard.some(s => s.name.toUpperCase() === name.toUpperCase())) return 'That bulk type already exists.';
-  state.yard.push({ name, rows: [] });
+  if (sections.some(s => s.name.toUpperCase() === name.toUpperCase())) return 'That bulk type already exists.';
+  sections.push({ name, rows: [] });
   return null;
 }
 
@@ -48,14 +50,14 @@ const cardTotal = card => (card.holds === null ? null : card.count * card.holds)
 // +1 / −1 / +½ / −½ / +¼ / −¼, kept to exact quarters and never below 0.
 export const stepCount = (count, delta) => Math.max(0, Math.round((count + delta) * 4) / 4);
 
-export const yardLines = state => state.yard.flatMap(({ name, rows }) => rows.flatMap((row, r) =>
+export const bulkLines = sections => sections.flatMap(({ name, rows }) => rows.flatMap((row, r) =>
   row.map(card => ({ section: name, row: r + 1, product: code(card), stillages: card.count, holds: card.holds, total: cardTotal(card) }))));
 
-// The table under the yard: each product code once, its stillages and total product added up across every card
+// The table under a bulk area: each product code once, its stillages and total product added up across every card
 // and bulk type, sorted by code. The total is unknown (null) if any of its cards has no "holds".
-export function yardTotals(state) {
+export function bulkTotals(sections) {
   const byCode = new Map();
-  for (const line of yardLines(state)) {
+  for (const line of bulkLines(sections)) {
     const t = byCode.get(line.product) ?? { product: line.product, stillages: 0, total: 0 };
     t.stillages += line.stillages;
     t.total = t.total === null || line.total === null ? null : t.total + line.total;
@@ -151,11 +153,11 @@ const FIRST_LAYOUTS = ['1', '2II', '3II', '4']; // the first release had only th
 export function migrate(state) {
   const list = v => (Array.isArray(v) ? v : []);
   if (state && typeof state === 'object') {
-    if (state.yard === undefined) state.yard = startingYard();
-    else if (state.yard && !Array.isArray(state.yard)) { // the first yard release: fixed White / Other sections
+    for (const area of BULK_AREAS) if (state[area] === undefined) state[area] = startingYard();
+    if (state.yard && !Array.isArray(state.yard)) { // the first yard release: fixed White / Other sections
       state.yard = [{ name: 'White Bulk', rows: state.yard.white }, { name: 'Other Bulk', rows: state.yard.other }];
     }
-    for (const section of list(state.yard)) { // that release could also leave empty rows behind
+    for (const section of BULK_AREAS.flatMap(area => list(state[area]))) { // that release could leave empty rows
       if (Array.isArray(section?.rows)) section.rows = section.rows.filter(row => !Array.isArray(row) || row.length);
       for (const card of list(section?.rows).flatMap(list)) if (card && card.holds === undefined) card.holds = null;
     }

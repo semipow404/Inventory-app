@@ -1,5 +1,5 @@
 // Excel export/import. ExcelJS is passed in: window.ExcelJS in the browser, the npm package in tests.
-import { LEVELS, LAYOUTS, COUNTS_KEPT, columnNumbers, allParts, hasProduct, isList, productCount, code, ymd, migrate, yardLines } from './logic.js';
+import { LEVELS, LAYOUTS, COUNTS_KEPT, columnNumbers, allParts, hasProduct, isList, productCount, code, ymd, migrate, bulkLines } from './logic.js';
 
 export const MARKER = 'INVENTORY-APP-V1';
 const HEADER = ['Row', 'Box', 'Partition', 'Code', 'Stock'];
@@ -57,21 +57,22 @@ function writeCount(ws, state, date) {
   }
 }
 
-// The yard, for reading in Excel (yard counts are changed in the app): title, header, one line per product card.
-function writeYard(ws, state, date) {
+// A bulk area (Yard or Offsite), for reading in Excel (counts are changed in the app): title, header, one line per card.
+function writeBulk(ws, title, sections, date) {
   ws.columns = [14, 6, 20, 10, 8, 10].map(width => ({ width }));
-  Object.assign(ws.getCell(1, 1), { value: `Yard — ${ymd(date)}`, font: { bold: true, size: 14 } });
+  Object.assign(ws.getCell(1, 1), { value: `${title} — ${ymd(date)}`, font: { bold: true, size: 14 } });
   ['Section', 'Row', 'Product', 'Stillages', 'Holds', 'Total'].forEach((h, i) =>
     Object.assign(ws.getCell(2, i + 1), { value: h, font: { bold: true }, border: { bottom: THIN } }));
-  yardLines(state).forEach((x, n) =>
+  bulkLines(sections).forEach((x, n) =>
     [x.section, x.row, x.product, x.stillages, x.holds, x.total].forEach((v, i) => { ws.getCell(3 + n, i + 1).value = v; }));
 }
 
-export async function exportWorkbook(ExcelJS, state, { date = new Date(), chunk = 30000, map = true, count = true, yard = true } = {}) {
+export async function exportWorkbook(ExcelJS, state, { date = new Date(), chunk = 30000, map = true, count = true, yard = true, offsite = true } = {}) {
   const wb = new ExcelJS.Workbook();
   if (map) drawMap(wb.addWorksheet('Stillage map'), state);
   if (count) writeCount(wb.addWorksheet('Stock count'), state, date);
-  if (yard) writeYard(wb.addWorksheet('Yard'), state, date);
+  if (yard) writeBulk(wb.addWorksheet('Yard'), 'Yard', state.yard, date);
+  if (offsite) writeBulk(wb.addWorksheet('Offsite'), 'Offsite', state.offsite, date);
 
   // The full layout always travels in the hidden sheet, so a map-only or count-only file still imports.
   const meta = wb.addWorksheet('_layout', { state: 'hidden' });
@@ -101,7 +102,7 @@ const isCard = c => isText(c?.style) && isText(c.number) && isText(c.color) &&
   typeof c.count === 'number' && c.count >= 0 && Number.isInteger(c.count * 4) && (c.holds === null || isWhole(c.holds, 1));
 const isYard = y => Array.isArray(y) && y.every(s =>
   isText(s?.name) && Array.isArray(s.rows) && s.rows.every(row => Array.isArray(row) && row.every(isCard)));
-const isState = s => Array.isArray(s?.styles) && s.styles.every(isText) && isYard(s.yard) &&
+const isState = s => Array.isArray(s?.styles) && s.styles.every(isText) && isYard(s.yard) && isYard(s.offsite) &&
   Array.isArray(s.rows) && s.rows.every(row => isText(row?.name) && Array.isArray(row.columns) && row.columns.every(isColumn));
 
 // The count table's header row and each field's column, found by text so rows or columns added in Excel don't break it.
