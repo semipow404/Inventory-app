@@ -116,7 +116,7 @@ assert.deepEqual(lvl.parts[1], p);
 // --- Yard: White Bulk and Other Bulk, each rows of product cards counted in stillages to the quarter
 {
   const s = L.newState();
-  assert.deepEqual(s.yard, { white: [[]], other: [[]] });
+  assert.deepEqual(s.yard, { white: [], other: [] });            // rows only exist with a card in them
   assert.deepEqual(L.YARD_SECTIONS, [['white', 'White Bulk'], ['other', 'Other Bulk']]);
   const { card } = L.makeYardCard({ style: 'LSW', number: ' 017 ', color: 'w' });
   assert.deepEqual(card, { style: 'LSW', number: '017', color: 'W', count: 0 });
@@ -129,15 +129,18 @@ assert.deepEqual(lvl.parts[1], p);
   for (let i = 0; i < 10; i++) q = L.stepCount(q, 0.25);
   assert.equal(q, 2.5);                                         // quarters add up exactly
   // Lines for the Excel Yard tab: white first, rows numbered from 1
-  s.yard.white[0].push({ ...card, count: 3 }, { style: 'LSW', number: '022', color: 'W', count: 2 });
-  s.yard.other = [[], [{ style: 'LSW', number: '033', color: 'KK', count: 1.5 }]];
+  const kk = { style: 'LSW', number: '033', color: 'KK', count: 1.5 };
+  s.yard.white.push([{ ...card, count: 3 }, { style: 'LSW', number: '022', color: 'W', count: 2 }], [{ style: 'LSW', number: '033', color: 'W', count: 1 }]);
+  s.yard.other.push([kk]);
   assert.deepEqual(L.yardLines(s), [
     { section: 'White Bulk', row: 1, product: 'LSW017W', stillages: 3 },
     { section: 'White Bulk', row: 1, product: 'LSW022W', stillages: 2 },
-    { section: 'Other Bulk', row: 2, product: 'LSW033KK', stillages: 1.5 },
+    { section: 'White Bulk', row: 2, product: 'LSW033W', stillages: 1 },
+    { section: 'Other Bulk', row: 1, product: 'LSW033KK', stillages: 1.5 },
   ]);
-  // Saves from before the yard existed get an empty one
-  assert.deepEqual(L.migrate({ styles: [], rows: [] }).yard, { white: [[]], other: [[]] });
+  // Saves from before the yard existed get an empty one; empty rows left by the first yard release are tidied away
+  assert.deepEqual(L.migrate({ styles: [], rows: [] }).yard, { white: [], other: [] });
+  assert.deepEqual(L.migrate({ styles: [], rows: [], yard: { white: [[], [kk], []], other: [[]] } }).yard, { white: [[kk]], other: [] });
 }
 
 // --- Spaces are named, "Walkway" by default
@@ -445,8 +448,8 @@ const sheets = wb => wb.worksheets.map(s => s.name);
 // --- Yard tab: one line per product card, white first; the yard itself comes back on import from the hidden data
 {
   const s = sample();
-  s.yard.white[0].push({ style: 'LSW', number: '017', color: 'W', count: 3 });
-  s.yard.other[0].push({ style: 'LSW', number: '033', color: 'KK', count: 1.5 });
+  s.yard.white.push([{ style: 'LSW', number: '017', color: 'W', count: 3 }]);
+  s.yard.other.push([{ style: 'LSW', number: '033', color: 'KK', count: 1.5 }]);
   const wb = await opened(await exportWorkbook(ExcelJS, s, { date: new Date(2026, 9, 24) }));
   assert.deepEqual(sheets(wb), ['Stillage map', 'Stock count', 'Yard', '_layout']);
   const y = wb.getWorksheet('Yard');

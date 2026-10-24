@@ -22,9 +22,9 @@ export const LAYOUTS = new Map([
 export const newState = () => ({ styles: [], rows: [], yard: emptyYard() });
 
 // The yard: bulk stillages waiting to come into the warehouse. Two fixed sections, each a list of rows of cards;
-// a card is a product code and how many stillages of it there are, in quarters.
+// a card is a product code and how many stillages of it there are, in quarters. A row only exists with a card in it.
 export const YARD_SECTIONS = [['white', 'White Bulk'], ['other', 'Other Bulk']];
-const emptyYard = () => ({ white: [[]], other: [[]] });
+const emptyYard = () => ({ white: [], other: [] });
 
 export function makeYardCard(fields) {
   const card = { ...cleanCode(fields), count: 0 };
@@ -124,6 +124,9 @@ const FIRST_LAYOUTS = ['1', '2II', '3II', '4']; // the first release had only th
 export function migrate(state) {
   const list = v => (Array.isArray(v) ? v : []);
   if (state && typeof state === 'object' && state.yard === undefined) state.yard = emptyYard();
+  for (const [key] of YARD_SECTIONS) { // the first yard release could leave empty rows behind
+    if (Array.isArray(state?.yard?.[key])) state.yard[key] = state.yard[key].filter(row => !Array.isArray(row) || row.length);
+  }
   for (const row of list(state?.rows)) for (const col of list(row?.columns)) {
     if (col?.type === 'space' && col.name === undefined) col.name = 'Walkway';
     if (col?.type === 'stillage') for (const lvl of list(col.levels)) {

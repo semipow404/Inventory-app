@@ -458,14 +458,19 @@ Object.assign(actions, {
     state.yard[s][r].push(card);
     commit();
   },
-  'yard-add-row'({ s }) { state.yard[s].push([]); commit(); },
+  async 'yard-add-row'({ s }) { // a new row starts with its first product, so no empty rows
+    const card = await askYardCard({ style: '', number: '', color: '' }, false);
+    if (!card || card === 'delete') return;
+    state.yard[s].push([card]);
+    commit();
+  },
   async 'yard-edit'({ s, r, c }) {
     const row = state.yard[s][r], card = row[c];
     const result = await askYardCard(card, true);
     if (result === 'delete') {
       if (!confirm(`Delete ${L.code(card)} from the yard?`)) return;
       row.splice(Number(c), 1);
-      if (!row.length && state.yard[s].length > 1) state.yard[s].splice(Number(r), 1); // a row left empty goes too
+      if (!row.length) state.yard[s].splice(Number(r), 1); // a row left empty goes too
     } else if (result) Object.assign(card, { style: result.style, number: result.number, color: result.color });
     else return;
     commit();
