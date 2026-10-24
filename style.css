@@ -164,4 +164,16 @@ dialog.photo-viewer { width: 100vw; height: 100dvh; max-width: none; max-height:
 .photo-frame { flex: 1; min-height: 0; overflow: auto; }
 #viewer-img { display: block; width: 100%; height: 100%; object-fit: contain; }
 #viewer-img.zoomed { width: auto; height: auto; max-width: none; }
-.photo-viewer menu { margin: 0; padding: 10px; }
+.photo-viewer menu { flex-wrap: wrap; margin: 0; padding: 10px; }
+.photo-viewer menu button { padding: 8px 10px; border-radius: 6px; }
+.photo-frame { position: relative; }
+.photo-nav { position: absolute; top: 50%; translate: 0 -50%; width: 44px; height: 64px; border: 0; border-radius: 8px; background: rgb(0 0 0 / .5); color: #fff; font-size: 2.4rem; line-height: 1; }
+.photo-nav.prev { left: 6px; }
+.photo-nav.next { right: 6px; }
+#photo-count { position: absolute; top: 8px; left: 50%; translate: -50% 0; padding: 2px 10px; border-radius: 10px; background: rgb(0 0 0 / .5); color: #fff; font-size: .9rem; }
+#markup-canvas { display: block; width: 100%; height: 100%; object-fit: contain; touch-action: none; }
+.markup-menu .on { outline: 3px solid var(--label); }
+/* Zoomed in, the frame scrolls, so the arrows and counter step aside. Markup swaps the photo for its drawing copy. */
+#viewer-img.zoomed ~ .photo-nav, #viewer-img.zoomed ~ #photo-count,
+.photo-viewer:not(.marking) #markup-canvas, .photo-viewer:not(.marking) .markup-menu,
+.photo-viewer.marking #viewer-img, .photo-viewer.marking .photo-nav, .photo-viewer.marking #photo-count, .photo-viewer.marking .viewer-menu { display: none; }

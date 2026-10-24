@@ -190,6 +190,15 @@ assert.deepEqual(lvl.parts[1], p);
   assert.deepEqual(L.specialPhotos(sp), ['p1', 'p2', 'p3']);
   assert.deepEqual(L.removePhoto(sp, 'p2'), { ...sp, sheets: ['p3'] });
   assert.deepEqual(L.removePhoto(sp, 'p1'), { ...sp, stillage: null });
+  // The viewer's arrows and swipes: stillage photo, then the order sheets, stopping at either end
+  assert.deepEqual([L.photoStep(sp, 'p1', 1), L.photoStep(sp, 'p2', 1), L.photoStep(sp, 'p2', -1)], ['p2', 'p3', 'p1']);
+  assert.deepEqual([L.photoStep(sp, 'p3', 1), L.photoStep(sp, 'p1', -1), L.photoStep({ ...sp, stillage: null }, 'p2', -1)], [null, null, null]);
+  assert.equal(L.photoStep(sp, 'gone', 1), null);
+  // Markup: a finger on a 2000×1000 photo fitted into a 400×800 box (shown 400×200, 300px bars above and below)
+  const box = { left: 0, top: 100, width: 400, height: 800 };
+  assert.deepEqual(L.fitPoint(box, 2000, 1000, 200, 500), [1000, 500]);
+  assert.deepEqual(L.fitPoint(box, 2000, 1000, 0, 400), [0, 0]);
+  assert.deepEqual(L.fitPoint(box, 2000, 1000, 400, 600), [2000, 1000]);
   assert.deepEqual(L.specialPhotos(made), []);
 }
 

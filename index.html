@@ -98,10 +98,25 @@
 
   <dialog id="photo-dialog" class="photo-viewer">
     <form method="dialog">
-      <div class="photo-frame"><img id="viewer-img" data-action="photo-zoom" alt="Photo"></div>
-      <menu>
+      <div class="photo-frame">
+        <img id="viewer-img" data-action="photo-zoom" alt="Photo">
+        <canvas id="markup-canvas"></canvas>
+        <button type="button" id="photo-prev" class="photo-nav prev" data-action="photo-step" data-step="-1" aria-label="Previous photo">‹</button>
+        <button type="button" id="photo-next" class="photo-nav next" data-action="photo-step" data-step="1" aria-label="Next photo">›</button>
+        <span id="photo-count"></span>
+      </div>
+      <menu class="viewer-menu">
         <button value="cancel">Close</button>
+        <button type="button" data-action="markup">Markup</button>
+        <button type="button" id="photo-unmark" data-action="photo-unmark">Remove markup</button>
         <button type="button" class="danger" data-action="photo-delete">Delete photo</button>
+      </menu>
+      <menu class="markup-menu">
+        <button type="button" data-action="markup-save">Save</button>
+        <button type="button" data-action="markup-cancel">Cancel</button>
+        <button type="button" data-action="markup-undo">Undo</button>
+        <button type="button" data-action="markup-tool" data-tool="text">Text</button>
+        <button type="button" data-action="markup-tool" data-tool="pen">Pen</button>
       </menu>
     </form>
   </dialog>

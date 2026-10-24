@@ -266,6 +266,16 @@ export const sortSpecials = list => [...list].reverse().sort((a, b) => b.date.lo
 export const dmy = iso => iso.split('-').reverse().join('-');
 export const specialPhotos = sp => [sp.stillage, ...sp.sheets].filter(Boolean);
 export const removePhoto = (sp, id) => ({ ...sp, stillage: sp.stillage === id ? null : sp.stillage, sheets: sp.sheets.filter(x => x !== id) });
+// The photo `step` places on from `id` (stillage photo first, then the order sheets), or null past either end.
+export const photoStep = (sp, id, step) => {
+  const all = specialPhotos(sp), i = all.indexOf(id);
+  return i < 0 ? null : all[i + step] ?? null;
+};
+// A screen point on a picture shown with object-fit: contain, in the picture's own pixels (bars fill the rest of the box).
+export function fitPoint(box, width, height, x, y) {
+  const scale = Math.min(box.width / width, box.height / height);
+  return [(x - box.left - (box.width - width * scale) / 2) / scale, (y - box.top - (box.height - height * scale) / 2) / scale];
+}
 
 // Local date as YYYY-MM-DD (toISOString would give the UTC date, off by one near midnight).
 export const ymd = (d = new Date()) =>

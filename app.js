@@ -548,7 +548,10 @@ function photoRequest(mode, makeRequest) {
 }
 const putPhoto = (id, blob) => photoRequest('readwrite', s => s.put(blob, id));
 const getPhoto = id => photoRequest('readonly', s => s.get(id));
-const deletePhoto = id => photoRequest('readwrite', s => s.delete(id)).catch(() => {});
+// A photo with markup keeps its untouched version under ORIGINAL + id, so Remove markup can put it back.
+const ORIGINAL = 'original:';
+const hasOriginal = id => photoRequest('readonly', s => s.count(ORIGINAL + id)).then(n => n > 0, () => false);
+const deletePhoto = id => Promise.all([id, ORIGINAL + id].map(k => photoRequest('readwrite', s => s.delete(k)))).catch(() => {});
 
 // Camera photos are large: keep at most 2000px on the long side (order sheets stay readable), as a JPEG.
 async function shrinkPhoto(file) {
@@ -571,6 +574,7 @@ async function photoUrl(id) {
   return photoUrls.get(id);
 }
 const fillPhotos = () => document.querySelectorAll('img[data-photo]').forEach(async img => { img.src = await photoUrl(img.dataset.photo); });
+function forgetUrl(id) { URL.revokeObjectURL(photoUrls.get(id)); photoUrls.delete(id); } // the photo changed: read it again
 
 const photoThumb = (sp, id) => `<img class="thumb" data-photo="${id}" role="button" data-action="photo-view" data-sp="${sp.id}" data-id="${id}" alt="Photo">`;
 const addPhotoButton = (sp, kind) => `<button class="photo-add" data-action="photo-add" data-sp="${sp.id}" data-kind="${kind}"
@@ -626,13 +630,57 @@ Object.assign(actions, {
   'photo-add'({ sp, kind }) { photoTarget = { page: route().name, sp, kind }; $('#add-photo-dialog').showModal(); },
   'photo-camera'() { $('#add-photo-dialog').close(); $('#camera-input').click(); },
   'photo-files'() { $('#add-photo-dialog').close(); $('#files-input').click(); },
-  async 'photo-view'({ sp, id }) {
+  'photo-view'({ sp, id }) {
     viewing = { page: route().name, sp, id };
-    $('#viewer-img').classList.remove('zoomed');
-    $('#viewer-img').src = await photoUrl(id);
+    endMarkup();
+    showPhoto(id);
     $('#photo-dialog').showModal();
   },
   'photo-zoom'(_, img) { img.classList.toggle('zoomed'); }, // full size, to scroll around small print
+  'photo-step'({ step }) { stepPhoto(Number(step)); },
+  async 'photo-unmark'() {
+    if (!confirm('Remove all markup from this photo?')) return;
+    const id = viewing.id;
+    try {
+      await putPhoto(id, await getPhoto(ORIGINAL + id));
+      await photoRequest('readwrite', s => s.delete(ORIGINAL + id));
+    } catch { return alert("Couldn't change that photo on this device."); }
+    forgetUrl(id);
+    render();
+    showPhoto(id);
+  },
+  markup() {
+    const img = $('#viewer-img');
+    if (!img.naturalWidth) return; // still loading
+    img.classList.remove('zoomed');
+    Object.assign(canvas, { width: img.naturalWidth, height: img.naturalHeight });
+    $('#photo-dialog').classList.add('marking');
+    const box = canvas.getBoundingClientRect();
+    ink = Math.max(canvas.width / box.width, canvas.height / box.height); // photo pixels per screen pixel
+    marks = [];
+    actions['markup-tool']({ tool: 'pen' });
+    redraw();
+  },
+  'markup-tool'({ tool: t }) {
+    tool = t;
+    document.querySelectorAll('[data-action="markup-tool"]').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
+  },
+  'markup-undo'() { marks.pop(); redraw(); },
+  'markup-cancel'() { if (!marks.length || confirm('Throw away this markup?')) endMarkup(); },
+  async 'markup-save'(_, button) {
+    const id = viewing.id;
+    if (!marks.length) return endMarkup();
+    button.disabled = true; // a second tap mid-save could store the marked photo as the original
+    try {
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+      if (!(await hasOriginal(id))) await putPhoto(ORIGINAL + id, await getPhoto(id));
+      await putPhoto(id, blob);
+    } catch { return alert("Couldn't save the markup on this device."); } finally { button.disabled = false; }
+    forgetUrl(id);
+    endMarkup();
+    render();
+    showPhoto(id);
+  },
   'photo-delete'() {
     if (!confirm('Delete this photo?')) return;
     const special = specialById(viewing.page, viewing.sp);
@@ -641,6 +689,81 @@ Object.assign(actions, {
     $('#photo-dialog').close();
     saveList(viewing.page);
   },
+});
+
+// The viewer steps through one stillage's photos: arrows, or a swipe when not zoomed in.
+async function showPhoto(id) {
+  viewing.id = id;
+  const all = L.specialPhotos(specialById(viewing.page, viewing.sp)), i = all.indexOf(id);
+  $('#photo-prev').hidden = i <= 0;
+  $('#photo-next').hidden = i === all.length - 1;
+  $('#photo-count').textContent = `${i + 1} / ${all.length}`;
+  $('#photo-unmark').hidden = true;
+  $('#viewer-img').classList.remove('zoomed');
+  $('#viewer-img').src = await photoUrl(id);
+  $('#photo-unmark').hidden = !(await hasOriginal(id));
+}
+function stepPhoto(step) {
+  const id = L.photoStep(specialById(viewing.page, viewing.sp), viewing.id, step);
+  if (id) showPhoto(id);
+}
+let swipeFrom = null;
+$('.photo-frame').addEventListener('touchstart', e => {
+  swipeFrom = e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null; // two fingers: a pinch
+}, { passive: true });
+$('.photo-frame').addEventListener('touchend', e => {
+  const from = swipeFrom, t = e.changedTouches[0];
+  swipeFrom = null;
+  if (!from || marks || $('#viewer-img').classList.contains('zoomed')) return;
+  const dx = t.clientX - from.x, dy = t.clientY - from.y;
+  if (Math.abs(dx) > 50 && Math.abs(dx) > 2 * Math.abs(dy)) stepPhoto(dx < 0 ? 1 : -1);
+});
+
+// Markup: a red pen and yellow text labels, drawn on a full-size copy of the photo. Saving replaces the photo
+// (thumbnails show the markup too); the untouched photo is kept so Remove markup can bring it back.
+const canvas = $('#markup-canvas'), pen = canvas.getContext('2d');
+let marks = null; // what's been drawn since Markup was pressed, so Undo can take the last one off; null when not marking
+let tool = 'pen', ink = 1;
+function endMarkup() { marks = null; $('#photo-dialog').classList.remove('marking'); }
+const canvasPoint = e => L.fitPoint(canvas.getBoundingClientRect(), canvas.width, canvas.height, e.clientX, e.clientY);
+function drawLine(points) {
+  Object.assign(pen, { strokeStyle: '#ff1a1a', lineWidth: 4 * ink, lineCap: 'round', lineJoin: 'round' });
+  pen.beginPath();
+  pen.moveTo(...points[0]);
+  points.forEach(p => pen.lineTo(...p));
+  pen.stroke();
+}
+function drawLabel({ text, x, y }) {
+  Object.assign(pen, { font: `bold ${18 * ink}px sans-serif`, textBaseline: 'middle' });
+  const w = pen.measureText(text).width + 12 * ink, h = 28 * ink;
+  const left = Math.max(0, Math.min(x - w / 2, canvas.width - w)), top = Math.max(0, Math.min(y - h / 2, canvas.height - h));
+  pen.fillStyle = '#ffd400';
+  pen.fillRect(left, top, w, h);
+  pen.fillStyle = '#000';
+  pen.fillText(text, left + 6 * ink, top + h / 2);
+}
+function redraw() {
+  pen.drawImage($('#viewer-img'), 0, 0);
+  marks.forEach(m => (m.line ? drawLine(m.line) : drawLabel(m)));
+}
+canvas.addEventListener('pointerdown', e => {
+  if (tool !== 'pen') return;
+  canvas.setPointerCapture(e.pointerId);
+  marks.push({ line: [canvasPoint(e)] });
+  drawLine(marks.at(-1).line);
+});
+const extendLine = e => {
+  const line = canvas.hasPointerCapture(e.pointerId) && marks.at(-1)?.line;
+  if (!line) return;
+  line.push(canvasPoint(e));
+  drawLine(line.slice(-2)); // just the new bit; redrawing everything on each move is slow on phones
+};
+canvas.addEventListener('pointermove', extendLine);
+canvas.addEventListener('pointerup', extendLine); // a quick stroke can end past its last move
+canvas.addEventListener('click', e => {
+  if (tool !== 'text') return;
+  const [x, y] = canvasPoint(e), text = prompt('Label')?.trim();
+  if (text) { marks.push({ text, x, y }); drawLabel(marks.at(-1)); }
 });
 
 for (const input of [$('#camera-input'), $('#files-input')]) input.addEventListener('change', async e => {
