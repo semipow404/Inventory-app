@@ -441,6 +441,15 @@ function yardCardHtml(s, r, c, card) {
   </div>`;
 }
 
+// The table under the yard: each product once, its stillages and total product (– when a card has no "holds").
+function yardTableHtml() {
+  const totals = L.yardTotals(state);
+  return totals.length ? `<table class="yard-table">
+    <thead><tr><th>Product</th><th>Stillages</th><th>Total product</th></tr></thead>
+    <tbody>${totals.map(t => `<tr><td>${esc(t.product)}</td><td>${t.stillages}</td><td>${t.total === null ? '–' : t.total.toLocaleString()}</td></tr>`).join('')}</tbody>
+  </table>` : '';
+}
+
 Object.assign(views, {
   yard: () => ({ title: 'Yard', html: `<div class="yard-page" data-scroll="yard">${state.yard.map(({ name, rows }, s) => `
     <section class="yard-section">
@@ -450,7 +459,7 @@ Object.assign(views, {
         <button class="yard-add" data-action="yard-add-card" data-s="${s}" data-r="${r}" aria-label="Add a product to this row">+</button>
       </div>`).join('')}
       <button class="yard-add" data-action="yard-add-row" data-s="${s}" aria-label="Add a row to ${esc(name)}">+</button>
-    </section>`).join('') || '<p class="muted">Add a bulk type in Settings to start.</p>'}</div>` }),
+    </section>`).join('') || '<p class="muted">Add a bulk type in Settings to start.</p>'}${yardTableHtml()}</div>` }),
 });
 
 // The yard card pop-up: resolves with the new card's code fields, 'delete', or null when cancelled.
@@ -458,10 +467,12 @@ async function askYardCard(card, deletable) {
   $('#y-style').innerHTML = styleOptions(card.style);
   $('#y-number').value = card.number;
   $('#y-color').value = card.color;
+  $('#y-holds').value = card.holds ?? '';
   yardDialog.querySelector('[value=delete]').hidden = !deletable;
   let made;
-  const choice = await ask(yardDialog, () =>
-    (made = L.makeYardCard({ style: $('#y-style').value, number: $('#y-number').value, color: $('#y-color').value })).error);
+  const choice = await ask(yardDialog, () => (made = L.makeYardCard({
+    style: $('#y-style').value, number: $('#y-number').value, color: $('#y-color').value, holds: $('#y-holds').value,
+  })).error);
   return choice === 'save' ? made.card : choice === 'delete' ? 'delete' : null;
 }
 
@@ -490,7 +501,7 @@ Object.assign(actions, {
       if (!confirm(`Delete ${L.code(card)} from the yard?`)) return;
       row.splice(Number(c), 1);
       if (!row.length) rows.splice(Number(r), 1); // a row left empty goes too
-    } else if (result) Object.assign(card, { style: result.style, number: result.number, color: result.color });
+    } else if (result) Object.assign(card, { style: result.style, number: result.number, color: result.color, holds: result.holds });
     else return;
     commit();
   },

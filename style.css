@@ -137,3 +137,7 @@ dialog menu { display: flex; flex-direction: row-reverse; gap: 8px; margin: 16px
 .yard-steps .down { background: #d91c1c; }
 .yard-add { flex: none; width: 48px; height: 40px; background: var(--line); color: #fff; border: 0; border-radius: 6px; font-size: 1.8rem; line-height: 1; }
 .yard-section > .yard-add { display: block; margin: 0 0 8px 50px; }
+.yard-table { width: 100%; margin-top: 20px; border-collapse: collapse; font-size: .9rem; }
+.yard-table th { text-align: left; font-weight: 400; padding: 6px; border-bottom: 2px solid var(--line); }
+.yard-table td { padding: 4px 6px; }
+#y-holds { width: 5em; margin-left: 6px; }
