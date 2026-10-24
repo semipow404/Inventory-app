@@ -113,11 +113,17 @@ assert.deepEqual(lvl.parts[1], p);
   assert.deepEqual(conv.parts, [{ ...L.emptyPart(), style: 'LSW', color: 'WK', list: [P('LSW', '012', 'WK', 3)] }]);
 }
 
-// --- Yard: White Bulk and Other Bulk, each rows of product cards counted in stillages to the quarter
+// --- Yard: bulk types (White Bulk and Other Bulk to start), each rows of product cards counted in stillages to the quarter
 {
   const s = L.newState();
-  assert.deepEqual(s.yard, { white: [], other: [] });            // rows only exist with a card in them
-  assert.deepEqual(L.YARD_SECTIONS, [['white', 'White Bulk'], ['other', 'Other Bulk']]);
+  assert.deepEqual(s.yard, [{ name: 'White Bulk', rows: [] }, { name: 'Other Bulk', rows: [] }]); // rows only exist with a card
+  // Settings adds bulk types like product styles: as typed, not blank, no duplicates (ignoring case); new ones go last
+  assert.equal(L.addBulkType(s, '  Black Bulk '), null);
+  assert.deepEqual(s.yard.map(x => x.name), ['White Bulk', 'Other Bulk', 'Black Bulk']);
+  assert.deepEqual(s.yard[2], { name: 'Black Bulk', rows: [] });
+  assert.match(L.addBulkType(s, 'black bulk'), /already/);
+  assert.match(L.addBulkType(s, '  '), /Enter/);
+  s.yard.pop();
   const { card } = L.makeYardCard({ style: 'LSW', number: ' 017 ', color: 'w' });
   assert.deepEqual(card, { style: 'LSW', number: '017', color: 'W', count: 0 });
   assert.match(L.makeYardCard({ style: '', number: ' ', color: '' }).error, /code/);
@@ -130,17 +136,20 @@ assert.deepEqual(lvl.parts[1], p);
   assert.equal(q, 2.5);                                         // quarters add up exactly
   // Lines for the Excel Yard tab: white first, rows numbered from 1
   const kk = { style: 'LSW', number: '033', color: 'KK', count: 1.5 };
-  s.yard.white.push([{ ...card, count: 3 }, { style: 'LSW', number: '022', color: 'W', count: 2 }], [{ style: 'LSW', number: '033', color: 'W', count: 1 }]);
-  s.yard.other.push([kk]);
+  s.yard[0].rows.push([{ ...card, count: 3 }, { style: 'LSW', number: '022', color: 'W', count: 2 }], [{ style: 'LSW', number: '033', color: 'W', count: 1 }]);
+  s.yard[1].rows.push([kk]);
   assert.deepEqual(L.yardLines(s), [
     { section: 'White Bulk', row: 1, product: 'LSW017W', stillages: 3 },
     { section: 'White Bulk', row: 1, product: 'LSW022W', stillages: 2 },
     { section: 'White Bulk', row: 2, product: 'LSW033W', stillages: 1 },
     { section: 'Other Bulk', row: 1, product: 'LSW033KK', stillages: 1.5 },
   ]);
-  // Saves from before the yard existed get an empty one; empty rows left by the first yard release are tidied away
-  assert.deepEqual(L.migrate({ styles: [], rows: [] }).yard, { white: [], other: [] });
-  assert.deepEqual(L.migrate({ styles: [], rows: [], yard: { white: [[], [kk], []], other: [[]] } }).yard, { white: [[kk]], other: [] });
+  // Saves from before the yard get the two starting types; the first yard release's fixed White / Other become
+  // bulk types, with the empty rows it could leave tidied away
+  assert.deepEqual(L.migrate({ styles: [], rows: [] }).yard, L.newState().yard);
+  assert.deepEqual(L.migrate({ styles: [], rows: [], yard: { white: [[], [kk], []], other: [[]] } }).yard,
+    [{ name: 'White Bulk', rows: [[kk]] }, { name: 'Other Bulk', rows: [] }]);
+  assert.deepEqual(L.migrate({ styles: [], rows: [], yard: [{ name: 'Black', rows: [[], [kk]] }] }).yard, [{ name: 'Black', rows: [[kk]] }]);
 }
 
 // --- Spaces are named, "Walkway" by default
@@ -445,17 +454,19 @@ const sheets = wb => wb.worksheets.map(s => s.name);
   assert.match(await tamperList(p => { p.list[0].list = []; }), /damaged/);        // no lists inside lists
 }
 
-// --- Yard tab: one line per product card, white first; the yard itself comes back on import from the hidden data
+// --- Yard tab: one line per product card, in bulk-type order; the yard itself comes back on import from the hidden data
 {
   const s = sample();
-  s.yard.white.push([{ style: 'LSW', number: '017', color: 'W', count: 3 }]);
-  s.yard.other.push([{ style: 'LSW', number: '033', color: 'KK', count: 1.5 }]);
+  s.yard[0].rows.push([{ style: 'LSW', number: '017', color: 'W', count: 3 }]);
+  s.yard[1].rows.push([{ style: 'LSW', number: '033', color: 'KK', count: 1.5 }]);
+  L.addBulkType(s, 'Black Bulk');
+  s.yard[2].rows.push([{ style: 'LAN', number: '042', color: 'BK', count: 0.25 }]);
   const wb = await opened(await exportWorkbook(ExcelJS, s, { date: new Date(2026, 9, 24) }));
   assert.deepEqual(sheets(wb), ['Stillage map', 'Stock count', 'Yard', '_layout']);
   const y = wb.getWorksheet('Yard');
   assert.ok(y.getCell(1, 1).text.includes('2026-10-24'));
   assert.deepEqual([2, 3, 4, 5].map(r => [1, 2, 3, 4].map(c => y.getCell(r, c).text)), [
-    ['Section', 'Row', 'Product', 'Stillages'], ['White Bulk', '1', 'LSW017W', '3'], ['Other Bulk', '1', 'LSW033KK', '1.5'], ['', '', '', '']]);
+    ['Section', 'Row', 'Product', 'Stillages'], ['White Bulk', '1', 'LSW017W', '3'], ['Other Bulk', '1', 'LSW033KK', '1.5'], ['Black Bulk', '1', 'LAN042BK', '0.25']]);
   assert.deepEqual(await importWorkbook(ExcelJS, await wb.xlsx.writeBuffer()), { state: s, skipped: [] });
   assert.deepEqual(sheets(await opened(await exportWorkbook(ExcelJS, s, { yard: false }))), ['Stillage map', 'Stock count', '_layout']);
   // Bad yard data in the hidden sheet is rejected like any other
@@ -468,10 +479,11 @@ const sheets = wb => wb.worksheets.map(s => s.name);
     return (await importWorkbook(ExcelJS, await w.xlsx.writeBuffer())).error ?? 'accepted';
   };
   assert.equal(await tamperYard(() => {}), 'accepted');
-  assert.match(await tamperYard(y => { y.white[0][0].count = -1; }), /damaged/);
-  assert.match(await tamperYard(y => { y.white[0][0].count = 0.3; }), /damaged/);
-  assert.match(await tamperYard(y => { y.other = 'x'; }), /damaged/);
-  assert.match(await tamperYard(y => { y.white[0][0].number = ['<b>'] ; }), /damaged/);
+  assert.match(await tamperYard(y => { y[0].rows[0][0].count = -1; }), /damaged/);
+  assert.match(await tamperYard(y => { y[0].rows[0][0].count = 0.3; }), /damaged/);
+  assert.match(await tamperYard(y => { y[1].rows = 'x'; }), /damaged/);
+  assert.match(await tamperYard(y => { y[0].rows[0][0].number = ['<b>']; }), /damaged/);
+  assert.match(await tamperYard(y => { y[2].name = { x: 1 }; }), /damaged/);
 }
 
 // --- A layout too big for one Excel cell survives (Review Focus 1)

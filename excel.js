@@ -1,5 +1,5 @@
 // Excel export/import. ExcelJS is passed in: window.ExcelJS in the browser, the npm package in tests.
-import { LEVELS, LAYOUTS, COUNTS_KEPT, YARD_SECTIONS, columnNumbers, allParts, hasProduct, isList, productCount, code, ymd, migrate, yardLines } from './logic.js';
+import { LEVELS, LAYOUTS, COUNTS_KEPT, columnNumbers, allParts, hasProduct, isList, productCount, code, ymd, migrate, yardLines } from './logic.js';
 
 export const MARKER = 'INVENTORY-APP-V1';
 const HEADER = ['Row', 'Box', 'Partition', 'Code', 'Stock'];
@@ -96,7 +96,8 @@ const isLevel = lvl => LAYOUTS.has(lvl?.layout) && Array.isArray(lvl.parts) &&
 const isColumn = col => (col?.type === 'space' && isText(col.name)) ||
   (col?.type === 'stillage' && Array.isArray(col.levels) && col.levels.length === LEVELS.length && col.levels.every(isLevel));
 const isCard = c => isText(c?.style) && isText(c.number) && isText(c.color) && typeof c.count === 'number' && c.count >= 0 && Number.isInteger(c.count * 4);
-const isYard = y => YARD_SECTIONS.every(([key]) => Array.isArray(y?.[key]) && y[key].every(row => Array.isArray(row) && row.every(isCard)));
+const isYard = y => Array.isArray(y) && y.every(s =>
+  isText(s?.name) && Array.isArray(s.rows) && s.rows.every(row => Array.isArray(row) && row.every(isCard)));
 const isState = s => Array.isArray(s?.styles) && s.styles.every(isText) && isYard(s.yard) &&
   Array.isArray(s.rows) && s.rows.every(row => isText(row?.name) && Array.isArray(row.columns) && row.columns.every(isColumn));
 

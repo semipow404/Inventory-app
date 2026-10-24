@@ -19,12 +19,20 @@ export const LAYOUTS = new Map([
   ['16', grid(4, 4)],
 ]);
 
-export const newState = () => ({ styles: [], rows: [], yard: emptyYard() });
+export const newState = () => ({ styles: [], rows: [], yard: startingYard() });
 
-// The yard: bulk stillages waiting to come into the warehouse. Two fixed sections, each a list of rows of cards;
-// a card is a product code and how many stillages of it there are, in quarters. A row only exists with a card in it.
-export const YARD_SECTIONS = [['white', 'White Bulk'], ['other', 'Other Bulk']];
-const emptyYard = () => ({ white: [], other: [] });
+// The yard: bulk stillages waiting to come into the warehouse, in sections ("bulk types", managed in Settings like
+// product styles). Each is a list of rows of cards; a card is a product code and how many stillages of it there
+// are, in quarters. A row only exists with a card in it.
+const startingYard = () => [{ name: 'White Bulk', rows: [] }, { name: 'Other Bulk', rows: [] }];
+
+export function addBulkType(state, name) {
+  name = name.trim();
+  if (!name) return 'Enter a bulk type.';
+  if (state.yard.some(s => s.name.toUpperCase() === name.toUpperCase())) return 'That bulk type already exists.';
+  state.yard.push({ name, rows: [] });
+  return null;
+}
 
 export function makeYardCard(fields) {
   const card = { ...cleanCode(fields), count: 0 };
@@ -34,8 +42,8 @@ export function makeYardCard(fields) {
 // +1 / −1 / +½ / −½ / +¼ / −¼, kept to exact quarters and never below 0.
 export const stepCount = (count, delta) => Math.max(0, Math.round((count + delta) * 4) / 4);
 
-export const yardLines = state => YARD_SECTIONS.flatMap(([key, section]) => state.yard[key].flatMap((row, r) =>
-  row.map(card => ({ section, row: r + 1, product: code(card), stillages: card.count }))));
+export const yardLines = state => state.yard.flatMap(({ name, rows }) => rows.flatMap((row, r) =>
+  row.map(card => ({ section: name, row: r + 1, product: code(card), stillages: card.count }))));
 // full: what "full" means for this partition (for the usage colours). counts: the last COUNTS_KEPT counts, newest last.
 export const emptyPart = () => ({ style: '', number: '', color: '', stock: null, full: null, counts: [] });
 export const COUNTS_KEPT = 30;
@@ -123,9 +131,14 @@ export function setLayout(level, id) {
 const FIRST_LAYOUTS = ['1', '2II', '3II', '4']; // the first release had only these, picked by partition count
 export function migrate(state) {
   const list = v => (Array.isArray(v) ? v : []);
-  if (state && typeof state === 'object' && state.yard === undefined) state.yard = emptyYard();
-  for (const [key] of YARD_SECTIONS) { // the first yard release could leave empty rows behind
-    if (Array.isArray(state?.yard?.[key])) state.yard[key] = state.yard[key].filter(row => !Array.isArray(row) || row.length);
+  if (state && typeof state === 'object') {
+    if (state.yard === undefined) state.yard = startingYard();
+    else if (state.yard && !Array.isArray(state.yard)) { // the first yard release: fixed White / Other sections
+      state.yard = [{ name: 'White Bulk', rows: state.yard.white }, { name: 'Other Bulk', rows: state.yard.other }];
+    }
+    for (const section of list(state.yard)) { // that release could also leave empty rows behind
+      if (Array.isArray(section?.rows)) section.rows = section.rows.filter(row => !Array.isArray(row) || row.length);
+    }
   }
   for (const row of list(state?.rows)) for (const col of list(row?.columns)) {
     if (col?.type === 'space' && col.name === undefined) col.name = 'Walkway';
