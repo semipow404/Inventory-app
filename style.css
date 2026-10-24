@@ -23,6 +23,8 @@ header h1 { flex: 1; margin: 0; text-align: center; font-size: 1.6rem; font-weig
 .warehouse { background: #0022ff; }
 .yard { background: #2a7d00; }
 .store { background: #c00000; }
+.split { background: #ff8c00; }
+.offsite { background: #7b2cbf; color: #fff; }
 .big:disabled { opacity: .45; }
 .pair { display: flex; gap: 12px; }
 .io { flex: 1; background: #000; color: #fff; border-color: #ff6a00; }

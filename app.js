@@ -67,7 +67,9 @@ window.addEventListener('hashchange', render);
 // Another tab or the installed app saved: reload, so this page's older copy can't overwrite it on its next save.
 window.addEventListener('storage', e => {
   if (e.key === KEY) state = load();
-  else if (e.key === SPECIALS_KEY) specials = loadSpecials();
+  else if (Object.values(PHOTO_PAGES).some(p => p.key === e.key)) {
+    for (const page in PHOTO_PAGES) if (PHOTO_PAGES[page].key === e.key) photoLists[page] = loadList(page);
+  }
   else return;
   render();
 });
@@ -79,6 +81,8 @@ Object.assign(views, {
       <a class="big warehouse" href="#warehouse">Warehouse</a>
       <a class="big yard" href="#yard">Yard</a>
       <a class="big store" href="#specials">Specials</a>
+      <a class="big split" href="#split">Split</a>
+      <a class="big offsite" href="#offsite">Offsite</a>
       <div class="pair">
         <button class="io" data-action="import">Import</button>
         <button class="io" data-action="export">Export</button>
@@ -96,16 +100,18 @@ Object.assign(views, {
         <input name="code" placeholder="e.g. LSW" autocomplete="off" autocapitalize="characters">
         <button>Add</button>
       </form>
-      <h2>Bulk types</h2>
-      <ul>${state.yard.map(({ name }, i) => `
-        <li>${esc(name)} <button data-action="remove-bulk" data-i="${i}" aria-label="Remove ${esc(name)}">✕</button></li>`).join('')
+      ${L.BULK_AREAS.map(area => `<h2>${AREA_TITLES[area]} bulk types</h2>
+      <ul>${state[area].map(({ name }, i) => `
+        <li>${esc(name)} <button data-action="remove-bulk" data-area="${area}" data-i="${i}" aria-label="Remove ${esc(name)}">✕</button></li>`).join('')
         || '<li class="muted">No bulk types yet</li>'}</ul>
-      <form data-action="add-bulk">
+      <form data-action="add-bulk" data-area="${area}">
         <input name="code" placeholder="e.g. Black Bulk" autocomplete="off">
         <button>Add</button>
-      </form>
+      </form>`).join('')}
     </section>` }),
 });
+
+const bulkArea = area => (L.BULK_AREAS.includes(area) ? state[area] : []); // a Settings list's sections
 
 Object.assign(actions, {
   'add-style'(_, form) {
@@ -114,15 +120,15 @@ Object.assign(actions, {
     commit();
   },
   'remove-style'({ i }) { state.styles.splice(Number(i), 1); commit(); },
-  'add-bulk'(_, form) {
-    const error = L.addBulkType(state, form.elements.code.value);
+  'add-bulk'({ area }, form) {
+    const error = L.addBulkType(bulkArea(area), form.elements.code.value);
     if (error) return alert(error);
     commit();
   },
-  'remove-bulk'({ i }) { // its cards go with it, so ask first if it has any
-    const { name, rows } = state.yard[i], n = rows.flat().length;
-    if (n && !confirm(`Remove ${name} and its ${L.productCount(n)} from the yard?`)) return;
-    state.yard.splice(Number(i), 1);
+  'remove-bulk'({ area, i }) { // its cards go with it, so ask first if it has any
+    const sections = bulkArea(area), { name, rows } = sections[i], n = rows.flat().length;
+    if (n && !confirm(`Remove ${name} and its ${L.productCount(n)} from ${AREA_TITLES[area]}?`)) return;
+    sections.splice(Number(i), 1);
     commit();
   },
 });
@@ -434,9 +440,11 @@ document.addEventListener('change', e => {
   commit();
 });
 
-// ---- Yard: bulk stillages waiting to come into the warehouse. Each section is rows of product cards, and each
-// card's count changes in quarter stillages with its six buttons.
+// ---- Bulk areas (Yard, Offsite): sections ("bulk types") of rows of product cards, each card's count changing in
+// quarter stillages with its six buttons. The page on screen decides which area the buttons act on.
 const yardDialog = $('#yard-dialog');
+const AREA_TITLES = { yard: 'Yard', offsite: 'Offsite' };
+const sectionsHere = () => state[route().name];
 const STEPS = [[1, '+1'], [-1, '−1'], [0.5, '+½'], [-0.5, '−½'], [0.25, '+¼'], [-0.25, '−¼']];
 
 function yardCardHtml(s, r, c, card) {
@@ -448,26 +456,25 @@ function yardCardHtml(s, r, c, card) {
   </div>`;
 }
 
-// The table under the yard: each product once, its stillages and total product (– when a card has no "holds").
-function yardTableHtml() {
-  const totals = L.yardTotals(state);
+// The table under a bulk area: each product once, its stillages and total product (– when a card has no "holds").
+function yardTableHtml(sections) {
+  const totals = L.bulkTotals(sections);
   return totals.length ? `<table class="yard-table">
     <thead><tr><th>Product</th><th>Stillages</th><th>Total product</th></tr></thead>
     <tbody>${totals.map(t => `<tr><td>${esc(t.product)}</td><td>${t.stillages}</td><td>${t.total === null ? '–' : t.total.toLocaleString()}</td></tr>`).join('')}</tbody>
   </table>` : '';
 }
 
-Object.assign(views, {
-  yard: () => ({ title: 'Yard', html: `<div class="yard-page" data-scroll="yard">${state.yard.map(({ name, rows }, s) => `
+const bulkView = area => () => ({ title: AREA_TITLES[area], html: `<div class="yard-page" data-scroll="${area}">${state[area].map(({ name, rows }, s) => `
     <section class="yard-section">
       <h2>${esc(name)}</h2>
-      ${rows.map((row, r) => `<div class="yard-row" data-scroll="yard-${s}-${r}">
+      ${rows.map((row, r) => `<div class="yard-row" data-scroll="${area}-${s}-${r}">
         ${row.map((card, c) => yardCardHtml(s, r, c, card)).join('')}
         <button class="yard-add" data-action="yard-add-card" data-s="${s}" data-r="${r}" aria-label="Add a product to this row">+</button>
       </div>`).join('')}
       <button class="yard-add" data-action="yard-add-row" data-s="${s}" aria-label="Add a row to ${esc(name)}">+</button>
-    </section>`).join('') || '<p class="muted">Add a bulk type in Settings to start.</p>'}${yardTableHtml()}</div>` }),
-});
+    </section>`).join('') || '<p class="muted">Add a bulk type in Settings to start.</p>'}${yardTableHtml(state[area])}</div>` });
+Object.assign(views, { yard: bulkView('yard'), offsite: bulkView('offsite') });
 
 // The yard card pop-up: resolves with the new card's code fields, 'delete', or null when cancelled.
 async function askYardCard(card, deletable) {
@@ -485,27 +492,27 @@ async function askYardCard(card, deletable) {
 
 Object.assign(actions, {
   'yard-step'({ s, r, c, d }) {
-    const card = state.yard[s].rows[r][c];
+    const card = sectionsHere()[s].rows[r][c];
     card.count = L.stepCount(card.count, Number(d));
     commit();
   },
   async 'yard-add-card'({ s, r }) {
     const card = await askYardCard({ style: '', number: '', color: '' }, false);
     if (!card || card === 'delete') return;
-    state.yard[s].rows[r].push(card);
+    sectionsHere()[s].rows[r].push(card);
     commit();
   },
   async 'yard-add-row'({ s }) { // a new row starts with its first product, so no empty rows
     const card = await askYardCard({ style: '', number: '', color: '' }, false);
     if (!card || card === 'delete') return;
-    state.yard[s].rows.push([card]);
+    sectionsHere()[s].rows.push([card]);
     commit();
   },
   async 'yard-edit'({ s, r, c }) {
-    const rows = state.yard[s].rows, row = rows[r], card = row[c];
+    const rows = sectionsHere()[s].rows, row = rows[r], card = row[c];
     const result = await askYardCard(card, true);
     if (result === 'delete') {
-      if (!confirm(`Delete ${L.code(card)} from the yard?`)) return;
+      if (!confirm(`Delete ${L.code(card)} from ${AREA_TITLES[route().name]}?`)) return;
       row.splice(Number(c), 1);
       if (!row.length) rows.splice(Number(r), 1); // a row left empty goes too
     } else if (result) Object.assign(card, { style: result.style, number: result.number, color: result.color, holds: result.holds });
@@ -514,16 +521,17 @@ Object.assign(actions, {
   },
 });
 
-// ---- Specials: stillages of custom products, checked against their order sheets using photos. Kept apart from the
-// warehouse data (their own storage key, photos in IndexedDB), so Export and Import never touch them.
-const SPECIALS_KEY = 'inventory-app-specials';
-let specials = loadSpecials();
-function loadSpecials() { try { return JSON.parse(localStorage.getItem(SPECIALS_KEY)) ?? []; } catch { return []; } }
-function saveSpecials() {
-  try { localStorage.setItem(SPECIALS_KEY, JSON.stringify(specials)); $('#banner').hidden = true; } catch { $('#banner').hidden = false; }
+// ---- Photo pages (Specials, Split): stillages checked against their order sheets using photos. Each page keeps its
+// own list under its own storage key, apart from the warehouse data (photos in IndexedDB), so Export and Import
+// never touch them. The page on screen decides which list the buttons act on.
+const PHOTO_PAGES = { specials: { title: 'Specials', key: 'inventory-app-specials' }, split: { title: 'Split', key: 'inventory-app-split' } };
+const loadList = page => { try { return JSON.parse(localStorage.getItem(PHOTO_PAGES[page].key)) ?? []; } catch { return []; } };
+const photoLists = Object.fromEntries(Object.keys(PHOTO_PAGES).map(page => [page, loadList(page)]));
+function saveList(page) {
+  try { localStorage.setItem(PHOTO_PAGES[page].key, JSON.stringify(photoLists[page])); $('#banner').hidden = true; } catch { $('#banner').hidden = false; }
   render();
 }
-const specialById = id => specials.find(sp => sp.id === id);
+const specialById = (page, id) => photoLists[page].find(sp => sp.id === id);
 
 // The photo store: IndexedDB holds far more than localStorage. One connection per request keeps it simple.
 function photoRequest(mode, makeRequest) {
@@ -568,9 +576,8 @@ const photoThumb = (sp, id) => `<img class="thumb" data-photo="${id}" role="butt
 const addPhotoButton = (sp, kind) => `<button class="photo-add" data-action="photo-add" data-sp="${sp.id}" data-kind="${kind}"
   aria-label="${kind === 'stillage' ? 'Add the stillage photo' : 'Add an order sheet photo'}">+</button>`;
 
-Object.assign(views, {
-  specials: () => ({ title: 'Specials', after: fillPhotos, html: `<div class="specials-page" data-scroll="specials">
-    ${L.sortSpecials(specials).map(sp => `<section class="special">
+const photoPageView = page => () => ({ title: PHOTO_PAGES[page].title, after: fillPhotos, html: `<div class="specials-page" data-scroll="${page}">
+    ${L.sortSpecials(photoLists[page]).map(sp => `<section class="special">
       <button class="special-date" data-action="special-edit" data-sp="${sp.id}">${L.dmy(sp.date)}</button>
       <div class="special-box">
         <div class="special-col"><h3>Stillage</h3>${sp.stillage ? photoThumb(sp, sp.stillage) : addPhotoButton(sp, 'stillage')}</div>
@@ -578,10 +585,10 @@ Object.assign(views, {
           <div class="sheet-row">${sp.sheets.map(id => photoThumb(sp, id)).join('')}${addPhotoButton(sp, 'sheet')}</div>
         </div>
       </div>
-    </section>`).join('') || '<p class="muted">No specials yet. Tap + when one comes in.</p>'}
-    <button class="yard-add" data-action="special-new" aria-label="New special">+</button>
-  </div>` }),
-});
+    </section>`).join('') || '<p class="muted">Nothing here yet. Tap + when a stillage comes in.</p>'}
+    <button class="yard-add" data-action="special-new" aria-label="New entry">+</button>
+  </div>` });
+Object.assign(views, { specials: photoPageView('specials'), split: photoPageView('split') });
 
 // The arrival date pop-up: resolves with the chosen date, 'delete' or 'cancel'.
 const specialDialog = $('#special-dialog');
@@ -593,33 +600,34 @@ async function askDate(date, editing) {
   return choice === 'save' ? $('#sp-date').value : choice;
 }
 
-let photoTarget = null; // { sp, kind } waiting for the camera or a file
-let viewing = null;     // { sp, id } shown full screen
+let photoTarget = null; // { page, sp, kind } waiting for the camera or a file
+let viewing = null;     // { page, sp, id } shown full screen
 
 Object.assign(actions, {
   async 'special-new'() {
+    const page = route().name;
     const date = await askDate(L.ymd(), false);
     if (date === 'cancel' || date === 'delete') return;
-    specials.push(L.newSpecial(date, crypto.randomUUID()).special);
-    saveSpecials();
+    photoLists[page].push(L.newSpecial(date, crypto.randomUUID()).special);
+    saveList(page);
   },
   async 'special-edit'({ sp }) {
-    const special = specialById(sp);
+    const page = route().name, special = specialById(page, sp);
     const result = await askDate(special.date, true);
     if (result === 'cancel') return;
     if (result === 'delete') {
       const photos = L.specialPhotos(special);
-      if (!confirm(`Delete the special from ${L.dmy(special.date)}${photos.length ? ` and its ${photos.length} photo${photos.length === 1 ? '' : 's'}` : ''}?`)) return;
-      specials = specials.filter(x => x !== special);
+      if (!confirm(`Delete the stillage from ${L.dmy(special.date)}${photos.length ? ` and its ${photos.length} photo${photos.length === 1 ? '' : 's'}` : ''}?`)) return;
+      photoLists[page] = photoLists[page].filter(x => x !== special);
       photos.forEach(deletePhoto);
     } else special.date = result;
-    saveSpecials();
+    saveList(page);
   },
-  'photo-add'({ sp, kind }) { photoTarget = { sp, kind }; $('#add-photo-dialog').showModal(); },
+  'photo-add'({ sp, kind }) { photoTarget = { page: route().name, sp, kind }; $('#add-photo-dialog').showModal(); },
   'photo-camera'() { $('#add-photo-dialog').close(); $('#camera-input').click(); },
   'photo-files'() { $('#add-photo-dialog').close(); $('#files-input').click(); },
   async 'photo-view'({ sp, id }) {
-    viewing = { sp, id };
+    viewing = { page: route().name, sp, id };
     $('#viewer-img').classList.remove('zoomed');
     $('#viewer-img').src = await photoUrl(id);
     $('#photo-dialog').showModal();
@@ -627,25 +635,25 @@ Object.assign(actions, {
   'photo-zoom'(_, img) { img.classList.toggle('zoomed'); }, // full size, to scroll around small print
   'photo-delete'() {
     if (!confirm('Delete this photo?')) return;
-    const special = specialById(viewing.sp);
+    const special = specialById(viewing.page, viewing.sp);
     Object.assign(special, L.removePhoto(special, viewing.id));
     deletePhoto(viewing.id);
     $('#photo-dialog').close();
-    saveSpecials();
+    saveList(viewing.page);
   },
 });
 
 for (const input of [$('#camera-input'), $('#files-input')]) input.addEventListener('change', async e => {
   const file = e.target.files[0], target = photoTarget;
   e.target.value = ''; // lets the same file be picked again
-  const special = target && specialById(target.sp);
+  const special = target && specialById(target.page, target.sp);
   if (!file || !special) return;
   try {
     const id = crypto.randomUUID();
     await putPhoto(id, await shrinkPhoto(file));
     if (target.kind === 'stillage') special.stillage = id;
     else special.sheets.push(id);
-    saveSpecials();
+    saveList(target.page);
   } catch { alert("Couldn't save that photo on this device."); }
 });
 
@@ -656,7 +664,7 @@ const exportDialog = $('#export-dialog');
 
 Object.assign(actions, {
   async export() {
-    const parts = () => ({ map: $('#x-map').checked, count: $('#x-count').checked, yard: $('#x-yard').checked });
+    const parts = () => ({ map: $('#x-map').checked, count: $('#x-count').checked, yard: $('#x-yard').checked, offsite: $('#x-offsite').checked });
     if (await ask(exportDialog, () => (Object.values(parts()).some(Boolean) ? null : 'Tick at least one.')) !== 'save') return;
     const name = `warehouse-${L.ymd()}.xlsx`;
     const file = new File([await exportWorkbook(window.ExcelJS, state, parts())], name, { type: XLSX_TYPE });
